@@ -49,22 +49,18 @@ function Computed:update()
     local prevSub = global.activeSub
     local prevTrackId = global.activeTrackId
 
-    global.activeSub = self
-    global.activeTrackId = global.nextTrackId()
-
+    global.setActiveSub(self, global.nextTrackId())
     system.startTrack(self)
 
     local oldValue = self.cachedValue
     local success, newValue = pcall(self.getter, oldValue)
 
+    global.setActiveSub(prevSub, prevTrackId)
+    system.endTrack(self)
+
     if not success then
-        global.setActiveSub(prevSub, prevTrackId)
-        system.endTrack(self)
 		return
     end
-
-	global.setActiveSub(prevSub, prevTrackId)
-	system.endTrack(self)
 
     if oldValue ~= newValue then
         self.cachedValue = newValue

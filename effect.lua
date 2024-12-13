@@ -35,12 +35,12 @@ function Effect:notify()
         if system.checkDirty(self.deps) then
             self:run()
             return
-        else
-            self.flags = bit.band(self.flags, bit.bnot(system.SubscriberFlags.ToCheckDirty))
         end
+
+        self.flags = bit.band(self.flags, bit.bnot(system.SubscriberFlags.ToCheckDirty))
     end
 
-    if bit.band(flags, system.SubscriberFlags.RunInnerEffects) ~= 0 then
+    if bit.band(flags, system.SubscriberFlags.RunInnerEffects) > 0 then
         self.flags = bit.band(self.flags, bit.bnot(system.SubscriberFlags.RunInnerEffects))
         local link = self.deps
 
@@ -58,18 +58,19 @@ end
 function Effect:run()
     local prevSub = global.activeSub
     local prevTrackId = global.activeTrackId
+
     global.setActiveSub(self, global.nextTrackId())
     system.startTrack(self)
 
     local success, result = pcall(self.fn)
+
+    global.setActiveSub(prevSub, prevTrackId)
+    system.endTrack(self)
+
     if not success then
-        global.setActiveSub(prevSub, prevTrackId)
-        system.endTrack(self)
 		return
     end
 
-	global.setActiveSub(prevSub, prevTrackId)
-	system.endTrack(self)
 	return result
 end
 

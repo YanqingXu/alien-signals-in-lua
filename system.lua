@@ -61,7 +61,11 @@ end
 
 local function _link(dep, sub)
     local currentDep = sub.depsTail
-    local nextDep = currentDep and currentDep.nextDep or sub.deps
+	local nextDep = sub.deps
+
+	if currentDep then
+		nextDep = currentDep.nextDep
+	end
 
     if nextDep and nextDep.dep == dep then
         sub.depsTail = nextDep
@@ -275,7 +279,7 @@ local function endTrack(sub)
 end
 
 local function isFlagDirty(flag)
-	return flag > 0 and bit.band(flag, SubscriberFlags.Dirty) ~= 0
+	return flag > 0 and bit.band(flag, SubscriberFlags.Dirty) > 0
 end
 
 local function checkDirty(deps)

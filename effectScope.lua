@@ -29,15 +29,15 @@ end
 
 function EffectScope:run(fn)
 	local prevSub = global.activeEffectScope
-	global.activeEffectScope = self
 
+	global.activeEffectScope = self
 	local success, result = pcall(fn)
+	global.activeEffectScope = prevSub
+
 	if not success then
-		global.activeEffectScope = prevSub
 		return
 	end
 
-	global.activeEffectScope = prevSub
 	return result
 end
 
