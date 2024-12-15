@@ -153,6 +153,7 @@ local function propagate(subs)
     local targetFlag = SubscriberFlags.Dirty
     local link = subs
     local stack = 0
+	local nextSub = nil
 
     repeat
 		local bBreak = false
@@ -171,17 +172,19 @@ local function propagate(subs)
 					sub.flags = bit.bor(sub.flags, targetFlag)
 					local subSubs = sub.subs
 					if subSubs then
+						targetFlag = SubscriberFlags.ToCheckDirty
 						if subSubs.nextSub then
 							subSubs.prevSub = subs
 							subs = subSubs
 							link = subs
-							targetFlag = SubscriberFlags.ToCheckDirty
 							stack = stack + 1
 						else
 							link = subSubs
-							targetFlag = sub.notify and SubscriberFlags.RunInnerEffects or SubscriberFlags.ToCheckDirty
+							if sub.notify then
+								targetFlag = SubscriberFlags.RunInnerEffects
+							end
 						end
-						return
+						return -- go to next iteration(repeat ... until false)
 					end
 
 					if sub.notify then
@@ -192,30 +195,34 @@ local function propagate(subs)
 						end
 						global.queuedEffectsTail = sub
 					end
+				elseif bit.band(sub.flags, targetFlag) == 0 then
+					sub.flags = bit.bor(sub.flags, targetFlag)
 				end
 			elseif isValidLink(link, sub) then
 				if bit.rshift(subFlags, 2) == 0 then
 					sub.flags = bit.bor(sub.flags, bit.bor(targetFlag, SubscriberFlags.CanPropagate))
 					local subSubs = sub.subs
 					if subSubs then
+						targetFlag = SubscriberFlags.ToCheckDirty
 						if subSubs.nextSub then
 							subSubs.prevSub = subs
 							subs = subSubs
 							link = subs
-							targetFlag = SubscriberFlags.ToCheckDirty
 							stack = stack + 1
 						else
 							link = subSubs
-							targetFlag = sub.notify and SubscriberFlags.RunInnerEffects or SubscriberFlags.ToCheckDirty
+							if sub.notify then
+								targetFlag = SubscriberFlags.RunInnerEffects
+							end
 						end
-						return
+						return -- go to next iteration(repeat ... until false)
 					end
 				elseif bit.band(sub.flags, targetFlag) == 0 then
 					sub.flags = bit.bor(sub.flags, targetFlag)
 				end
 			end
 
-			local nextSub = subs.nextSub
+			nextSub = subs.nextSub
 			if not nextSub then
 				if stack > 0 then
 					local dep = subs.dep
@@ -228,8 +235,11 @@ local function propagate(subs)
 						link = subs
 
 						if subs then
-							targetFlag = stack > 0 and SubscriberFlags.ToCheckDirty or SubscriberFlags.Dirty
-							return
+							targetFlag = SubscriberFlags.Dirty
+							if stack > 0 then
+								targetFlag = SubscriberFlags.ToCheckDirty
+							end
+							return -- do_func return
 						end
 
 						dep = prevLink.dep
@@ -239,9 +249,11 @@ local function propagate(subs)
 				return
 			end
 
-
 			if link ~= subs then
-				targetFlag = stack > 0 and SubscriberFlags.ToCheckDirty or SubscriberFlags.Dirty
+				targetFlag = SubscriberFlags.Dirty
+				if stack > 0 then
+					targetFlag = SubscriberFlags.ToCheckDirty
+				end
 			end
 
 			subs = nextSub
@@ -278,10 +290,6 @@ local function endTrack(sub)
 	sub.flags = bit.band(sub.flags, bit.bnot(SubscriberFlags.Tracking))
 end
 
-local function isFlagDirty(flag)
-	return flag > 0 and bit.band(flag, SubscriberFlags.Dirty) > 0
-end
-
 local function checkDirty(deps)
     local stack = 0
 	local dirty = false
@@ -299,13 +307,13 @@ local function checkDirty(deps)
 					dirty = true
 				else
 					local depFlags = dep.flags
-					if isFlagDirty(depFlags) then
+					if bit.band(depFlags, SubscriberFlags.Dirty) > 0 then
 						dirty = dep:update()
 					elseif bit.band(depFlags, SubscriberFlags.ToCheckDirty) > 0 then
 						dep.subs.prevSub = deps
 						deps = dep.deps
 						stack = stack + 1
-						return -- 跳出最外层 do_func
+						return -- do_func return
 					end
 				end
 			end
@@ -328,16 +336,16 @@ local function checkDirty(deps)
 								if sub.update() then
 									sub = prevLink.sub
 									dirty = true
-									return -- 跳出内层 do_func
+									return -- inner do_func return
 								end
 							else
-								sub.flags = bit.band(sub.flags, bit.bnot(SubscriberFlags.Dirtys))
+								sub.flags = bit.band(sub.flags, bit.bnot(SubscriberFlags.ToCheckDirty))
 							end
 
 							deps = prevLink.nextDep
 							if deps then
 								gototop = true
-								return
+								return -- inner do_func return
 							end
 
 							sub = prevLink.sub
@@ -345,17 +353,17 @@ local function checkDirty(deps)
 						end)
 
 						if gototop then
-							break -- 跳出 repeat until stack <= 0
+							break
 						end
 					until stack <= 0
 
 					if gototop then
-						return -- 跳出最外层 do_func
+						return -- outter do_func return
 					end
 				end
 
 				returned = true
-				return -- 跳出最外层 do_func
+				return
 			end
 		end)
 

@@ -5,7 +5,7 @@ local system = require 'system'
 local Computed = {}
 Computed.__index = Computed
 
-function Computed.new(getter)
+function Computed.new(getter, ...)
     local self = setmetatable({}, Computed)
     self.getter = getter    --计算函数
     self.cachedValue = nil  --缓存的计算结果
@@ -20,6 +20,7 @@ function Computed.new(getter)
     self.deps = nil         -- 依赖项链表头
     self.depsTail = nil     -- 依赖项链表尾
     self.flags = system.SubscriberFlags.Dirty -- 状态标志
+    self.args = {...}
     return self
 end
 
@@ -71,8 +72,8 @@ function Computed:update()
     return false
 end
 
-local function computed(getter)
-    return Computed.new(getter)
+local function computed(getter, ...)
+    return Computed.new(getter, ...)
 end
 
 return {

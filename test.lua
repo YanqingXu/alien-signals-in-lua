@@ -1,4 +1,3 @@
-package.path = package.path .. ";../?.lua"
 require 'global'
 
 local effect = require 'effect'
@@ -6,17 +5,24 @@ local signal = require 'signal'
 local computed = require 'computed'
 local effectScope = require 'effectScope'
 
-local function test1()
+local test = {
+    it = function(name, fn)
+        print(name)
+        fn()
+    end,
+}
+
+test.it("should clear subscriptions when untracked by all subscribers", function()
     local bRunTimes = 0
 
-    local a = signal.signal(1)
+    local a = signal.signal(1, "signal_a")
     local b = computed.computed(function()
         bRunTimes = bRunTimes + 1
         return a:get() * 2
-    end)
+    end, "computed_b")
     local effect1 = effect.effect(function()
         b:get()
-    end)
+    end, "effect1")
 
     assert(bRunTimes == 1)
     a:set(2)
@@ -24,13 +30,13 @@ local function test1()
     effect1:stop()
     a:set(3)
     assert(bRunTimes == 2)
-end
+end)
 
-local function test2()
-    local a = signal.signal(3)
+test.it("should not run untracked inner effect", function()
+    local a = signal.signal(3, "signal_a")
     local b = computed.computed(function()
         return a:get() > 0
-    end)
+    end, "computed_b")
 
     effect.effect(function()
         if b:get() then
@@ -38,9 +44,9 @@ local function test2()
                 if a:get() == 0 then
                     error("bad")
                 end
-            end)
+            end, "inner effect")
         end
-    end)
+    end, "outer effect")
 
     local function decrement()
         a:set(a:get() - 1)
@@ -49,11 +55,11 @@ local function test2()
     decrement()
     decrement()
     decrement()
-end
+end)
 
-local function test3()
-    local a = signal.signal(1)
-    local b = signal.signal(1)
+test.it("should run outer effect first", function()
+    local a = signal.signal(1, "signal_a")
+    local b = signal.signal(1, "signal_b")
 
     effect.effect(function()
         if a:get() then
@@ -62,22 +68,21 @@ local function test3()
                 if a:get() == 0 then
                     error("bad")
                 end
-            end)
-        else
+            end, "inner effect")
         end
-    end)
+    end, "outer effect")
 
     global.startBatch()
     b:set(0)
     a:set(0)
     global.endBatch()
-end
+end)
 
-local function test4()
-    local a = signal.signal(0)
+test.it("should not trigger inner effect when resolve maybe dirty", function()
+    local a = signal.signal(0, "signal_a")
     local b = computed.computed(function()
         return a:get() % 2
-    end)
+    end, "computed_b")
 
     local innerTriggerTimes = 0
 
@@ -88,18 +93,18 @@ local function test4()
             if innerTriggerTimes > 1 then
                 error("bad")
             end
-        end)
-    end)
+        end, "inner effect")
+    end, "outer effect")
 
     a:set(2)
-end
+end)
 
-local function test5()
-    local a = signal.signal(0)
-    local b = signal.signal(0)
+test.it("should trigger inner effects in sequence", function()
+    local a = signal.signal(0, "signal_a")
+    local b = signal.signal(0, "signal_b")
     local c = computed.computed(function()
         return a:get() - b:get()
-    end)
+    end, "computed_c")
 
     local order = {}
     effect.effect(function()
@@ -108,14 +113,14 @@ local function test5()
         effect.effect(function()
             table.insert(order, 'first inner')
             a:get()
-        end)
+        end, "inner effect 1")
 
         effect.effect(function()
             table.insert(order, 'last inner')
             a:get()
             b:get()
-        end)
-    end)
+        end, "inner effect 2")
+    end, "outer effect")
 
     order = {}
 
@@ -127,9 +132,9 @@ local function test5()
     assert(#order == 2)
     assert(order[1] == 'first inner')
     assert(order[2] == 'last inner')
-end
+end)
 
-local function test6()
+test.it("should trigger inner effects in sequence in effect scope", function()
     local a = signal.signal(0)
     local b = signal.signal(0)
     local scope = effectScope.effectScope()
@@ -158,12 +163,4 @@ local function test6()
     assert(#order == 2)
     assert(order[1] == 'first inner')
     assert(order[2] == 'last inner')
-end
-
-test1()
-test2()
-test3()
-test4()
-test5()
-test6()
-
+end)

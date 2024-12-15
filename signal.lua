@@ -4,12 +4,13 @@ local system = require 'system'
 local Signal = {}
 Signal.__index = Signal
 
-function Signal.new(initialValue)
+function Signal.new(initialValue, ...)
     local self = setmetatable({}, Signal)
     self.currentValue = initialValue
     self.subs = nil
     self.subsTail = nil
     self.lastTrackedId = 0
+    self.args = {...}
     return self
 end
 
@@ -25,15 +26,14 @@ function Signal:set(value)
     if self.currentValue ~= value then
         self.currentValue = value
 
-        local subs = self.subs
-        if subs then
-            system.propagate(subs)
+        if self.subs then
+            system.propagate(self.subs)
         end
     end
 end
 
-local function signal(initialValue)
-    return Signal.new(initialValue)
+local function signal(initialValue, ...)
+    return Signal.new(initialValue, ...)
 end
 
 return {

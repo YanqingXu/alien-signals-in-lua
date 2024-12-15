@@ -5,11 +5,12 @@ local system = require 'system'
 local EffectScope = {}
 EffectScope.__index = EffectScope
 
-function EffectScope.new()
+function EffectScope.new(...)
 	local self = setmetatable({}, EffectScope)
 	self.deps = nil
 	self.depsTail = nil
 	self.flags = system.SubscriberFlags.None
+	self.args = {...}
 	return self
 end
 
