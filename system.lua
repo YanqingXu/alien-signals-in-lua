@@ -149,6 +149,26 @@ local function isValidLink(subLink, sub)
     return false
 end
 
+local function checkSubs(sub, link, subs, stack, targetFlag)
+	local subSubs = sub.subs
+	if subSubs then
+		targetFlag = SubscriberFlags.ToCheckDirty
+		if subSubs.nextSub then
+			subSubs.prevSub = subs
+			subs = subSubs
+			link = subs
+			stack = stack + 1
+		else
+			link = subSubs
+			if sub.notify then
+				targetFlag = SubscriberFlags.RunInnerEffects
+			end
+		end
+	end
+
+	return stack, targetFlag, link
+end
+
 local function propagate(subs)
     local targetFlag = SubscriberFlags.Dirty
     local link = subs
@@ -170,21 +190,9 @@ local function propagate(subs)
 
 				if canPropagate then
 					sub.flags = bit.bor(sub.flags, targetFlag)
-					local subSubs = sub.subs
-					if subSubs then
-						targetFlag = SubscriberFlags.ToCheckDirty
-						if subSubs.nextSub then
-							subSubs.prevSub = subs
-							subs = subSubs
-							link = subs
-							stack = stack + 1
-						else
-							link = subSubs
-							if sub.notify then
-								targetFlag = SubscriberFlags.RunInnerEffects
-							end
-						end
-						return -- go to next iteration(repeat ... until false)
+					stack, targetFlag, link = checkSubs(sub, link, subs, stack, targetFlag)
+					if sub.subs then
+						return
 					end
 
 					if sub.notify then
@@ -201,21 +209,9 @@ local function propagate(subs)
 			elseif isValidLink(link, sub) then
 				if bit.rshift(subFlags, 2) == 0 then
 					sub.flags = bit.bor(sub.flags, bit.bor(targetFlag, SubscriberFlags.CanPropagate))
-					local subSubs = sub.subs
-					if subSubs then
-						targetFlag = SubscriberFlags.ToCheckDirty
-						if subSubs.nextSub then
-							subSubs.prevSub = subs
-							subs = subSubs
-							link = subs
-							stack = stack + 1
-						else
-							link = subSubs
-							if sub.notify then
-								targetFlag = SubscriberFlags.RunInnerEffects
-							end
-						end
-						return -- go to next iteration(repeat ... until false)
+					stack, targetFlag, link = checkSubs(sub, link, subs, stack, targetFlag)
+					if sub.subs then
+						return
 					end
 				elseif bit.band(sub.flags, targetFlag) == 0 then
 					sub.flags = bit.bor(sub.flags, targetFlag)
@@ -365,6 +361,8 @@ local function checkDirty(deps)
 				returned = true
 				return
 			end
+
+			deps = nextDep
 		end)
 
 		if returned then
