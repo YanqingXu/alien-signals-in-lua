@@ -12,6 +12,14 @@ local test = {
     end,
 }
 
+local expect = function(actual)
+    return {
+        toBe = function(expected)
+            assert(actual == expected)
+        end
+    }
+end
+
 test.it("should clear subscriptions when untracked by all subscribers", function()
     local bRunTimes = 0
 
@@ -163,4 +171,25 @@ test.it("should trigger inner effects in sequence in effect scope", function()
     assert(#order == 2)
     assert(order[1] == 'first inner')
     assert(order[2] == 'last inner')
+end)
+
+test.it("should not trigger after stop", function()
+    local count = signal.signal(1)
+    local scope = effectScope.effectScope()
+
+    local triggers = 0
+
+    scope:run(function()
+        effect.effect(function()
+            triggers = triggers + 1
+            count:get()
+        end)
+    end)
+
+    expect(triggers).toBe(1)
+    count:set(2)
+    expect(triggers).toBe(2)
+    scope:stop()
+    count:set(3)
+    expect(triggers).toBe(2)
 end)
