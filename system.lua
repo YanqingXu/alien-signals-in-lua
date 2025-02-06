@@ -222,6 +222,26 @@ local function updateSubscriberState(nextSub, stack, link, subs)
     return subs, link, newFlag
 end
 
+-- 处理依赖栈
+local function processDependencyStack(stack, dep)
+    stack = stack - 1
+    local depSubs = dep.subs
+    local prevLink = depSubs.prevSub
+    depSubs.prevSub = nil
+    local subs = prevLink.nextSub
+    local link = subs
+
+    if subs then
+        local targetFlag = SubscriberFlags.Dirty
+        if stack > 0 then
+            targetFlag = SubscriberFlags.ToCheckDirty
+        end
+        return stack, targetFlag, link, subs, prevLink.dep, true
+    end
+
+    return stack, nil, link, subs, prevLink.dep, false
+end
+
 -- 主传播函数
 local function propagate(subs)
     -- 初始状态
@@ -251,27 +271,17 @@ local function propagate(subs)
                     -- 状态9: 开始处理依赖栈
                     local dep = subs.dep
                     repeat
-                        -- 状态10: 栈回退
-                        stack = stack - 1
-                        local depSubs = dep.subs
-                        local prevLink = depSubs.prevSub
-                        -- 状态11: 清理前一个链接
-                        depSubs.prevSub = nil
-                        -- 状态12: 更新订阅者和链接
-                        subs = prevLink.nextSub
-                        link = subs
+                        -- 处理依赖栈并获取新状态
+                        local newStack, newFlag, newLink, newSubs, newDep, shouldReturn = processDependencyStack(stack, dep)
+                        stack = newStack
+                        link = newLink
+                        subs = newSubs
+                        dep = newDep
 
-                        if subs then
-                            -- 状态13: 更新目标标志
-                            targetFlag = SubscriberFlags.Dirty
-                            if stack > 0 then
-                                targetFlag = SubscriberFlags.ToCheckDirty
-                            end
-                            return -- do_func return
+                        if shouldReturn then
+                            targetFlag = newFlag
+                            return -- 保持原有的返回时机
                         end
-
-                        -- 状态14: 继续处理依赖
-                        dep = prevLink.dep
                     until stack <= 0
                 end
                 -- 状态15: 处理完所有依赖，准备退出
