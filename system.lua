@@ -26,25 +26,31 @@ function Link.new(dep, sub, nextDep)
     return self
 end
 
-local function linkNewDep(dep, sub, nextDep, depsTail)
-    local newLink
-
+-- 从链接池中获取或创建新链接
+local function getOrCreateLink(dep, sub, nextDep)
     if global.linkPool then
-        newLink = global.linkPool
-        global.linkPool = newLink.nextDep
-        newLink.nextDep = nextDep
-        newLink.dep = dep
-        newLink.sub = sub
-    else
-        newLink = Link.new(dep, sub, nextDep)
+        local link = global.linkPool
+        global.linkPool = link.nextDep
+        link.nextDep = nextDep
+        link.dep = dep
+        link.sub = sub
+        return link
     end
+    return Link.new(dep, sub, nextDep)
+end
 
+-- 更新订阅者的依赖链接
+local function updateSubscriberDeps(sub, newLink, depsTail)
     if not depsTail then
         sub.deps = newLink
     else
         depsTail.nextDep = newLink
     end
+    sub.depsTail = newLink
+end
 
+-- 更新依赖的订阅者链接
+local function updateDependencySubs(dep, newLink)
     if not dep.subs then
         dep.subs = newLink
     else
@@ -52,20 +58,25 @@ local function linkNewDep(dep, sub, nextDep, depsTail)
         newLink.prevSub = oldTail
         oldTail.nextSub = newLink
     end
-
-    sub.depsTail = newLink
     dep.subsTail = newLink
+end
 
+-- 创建新的依赖链接
+local function linkNewDep(dep, sub, nextDep, depsTail)
+    local newLink = getOrCreateLink(dep, sub, nextDep)
+    updateSubscriberDeps(sub, newLink, depsTail)
+    updateDependencySubs(dep, newLink)
     return newLink
 end
 
-local function _link(dep, sub)
+-- 查找或创建依赖链接
+local function findOrCreateLink(dep, sub)
     local currentDep = sub.depsTail
-	local nextDep = sub.deps
+    local nextDep = sub.deps
 
-	if currentDep then
-		nextDep = currentDep.nextDep
-	end
+    if currentDep then
+        nextDep = currentDep.nextDep
+    end
 
     if nextDep and nextDep.dep == dep then
         sub.depsTail = nextDep
@@ -75,46 +86,64 @@ local function _link(dep, sub)
     return linkNewDep(dep, sub, nextDep, currentDep)
 end
 
+-- 检查链接是否有效
 local function isValidLink(subLink, sub)
     local depsTail = sub.depsTail
     if not depsTail then
         return false
     end
 
-    local link = sub.deps
-    repeat
+    -- 使用 for 循环替代 repeat，更清晰
+    for link = sub.deps, depsTail, link.nextDep do
         if link == subLink then
             return true
         end
-
         if link == depsTail then
             break
         end
-
-        link = link.nextDep
-    until not link
+    end
 
     return false
 end
 
-local function checkSubs(sub, link, subs, stack, targetFlag)
-	local subSubs = sub.subs
-	if subSubs then
-		targetFlag = SubscriberFlags.ToCheckDirty
-		if subSubs.nextSub then
-			subSubs.prevSub = subs
-			subs = subSubs
-			link = subs
-			stack = stack + 1
-		else
-			link = subSubs
-			if sub.notify then
-				targetFlag = SubscriberFlags.RunInnerEffects
-			end
-		end
-	end
+-- 更新子订阅者的链接
+local function updateSubsLinks(subSubs, subs)
+    if subSubs.nextSub then
+        subSubs.prevSub = subs
+        return subSubs, subSubs, true
+    end
+    return subSubs, subSubs, false
+end
 
-	return stack, targetFlag, link
+-- 确定目标标志
+local function determineTargetFlag(sub, needsStack)
+    if needsStack then
+        return SubscriberFlags.ToCheckDirty
+    end
+    if sub.notify then
+        return SubscriberFlags.RunInnerEffects
+    end
+    return SubscriberFlags.ToCheckDirty
+end
+
+-- 检查子订阅者并更新状态
+local function checkSubs(sub, link, subs, stack, targetFlag)
+    local subSubs = sub.subs
+    if not subSubs then
+        return stack, targetFlag, link
+    end
+
+    -- 更新链接并确定是否需要增加栈深度
+    local newSubs, newLink, needsStack = updateSubsLinks(subSubs, subs)
+    if needsStack then
+        stack = stack + 1
+        subs = newSubs
+    end
+
+    -- 确定新的目标标志
+    targetFlag = determineTargetFlag(sub, needsStack)
+
+    return stack, targetFlag, newLink
 end
 
 -- 检查订阅者是否可以传播更新
@@ -483,7 +512,7 @@ end
 
 return {
 	SubscriberFlags = SubscriberFlags,
-	link = _link,
+	link = findOrCreateLink,
     Link = Link,
 
     propagate = propagate,
