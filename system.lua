@@ -93,11 +93,11 @@ local function isValidLink(subLink, sub)
         return false
     end
 
-    -- 使用 for 循环替代 repeat，更清晰
     for link = sub.deps, depsTail, link.nextDep do
         if link == subLink then
             return true
         end
+
         if link == depsTail then
             break
         end
@@ -120,9 +120,11 @@ local function determineTargetFlag(sub, needsStack)
     if needsStack then
         return SubscriberFlags.ToCheckDirty
     end
+
     if sub.notify then
         return SubscriberFlags.RunInnerEffects
     end
+
     return SubscriberFlags.ToCheckDirty
 end
 
@@ -133,16 +135,13 @@ local function checkSubs(sub, link, subs, stack, targetFlag)
         return stack, targetFlag, link
     end
 
-    -- 更新链接并确定是否需要增加栈深度
     local newSubs, newLink, needsStack = updateSubsLinks(subSubs, subs)
     if needsStack then
         stack = stack + 1
         subs = newSubs
     end
 
-    -- 确定新的目标标志
     targetFlag = determineTargetFlag(sub, needsStack)
-
     return stack, targetFlag, newLink
 end
 
@@ -165,11 +164,13 @@ end
 -- 处理副作用队列
 local function handleEffectQueue(sub)
     if not sub.notify then return end
+
     if global.queuedEffectsTail then
         global.queuedEffectsTail.nextNotify = sub
     else
         global.queuedEffects = sub
     end
+
     global.queuedEffectsTail = sub
 end
 
@@ -190,41 +191,34 @@ local function updateTargetFlag(stack, link, subs)
     return nil
 end
 
--- 获取下一个订阅者
-local function getNextSubscriber(subs)
-    return subs.nextSub
-end
-
 -- 更新订阅者状态
 local function updateSubscriberState(nextSub, stack, link, subs)
-    -- 更新目标标志
     local newFlag = updateTargetFlag(stack, link, subs)
-    
-    -- 更新订阅者和链接
     subs = nextSub
     link = nextSub
-    
     return subs, link, newFlag
 end
 
 -- 处理依赖栈
 local function processDependencyStack(stack, dep)
     stack = stack - 1
-    local depSubs = dep.subs
+
+	local depSubs = dep.subs
     local prevLink = depSubs.prevSub
     depSubs.prevSub = nil
+
     local subs = prevLink.nextSub
     local link = subs
+	local targetFlag = nil
 
     if subs then
-        local targetFlag = SubscriberFlags.Dirty
+        targetFlag = SubscriberFlags.Dirty
         if stack > 0 then
             targetFlag = SubscriberFlags.ToCheckDirty
         end
-        return stack, targetFlag, link, subs, prevLink.dep, true
     end
 
-    return stack, nil, link, subs, prevLink.dep, false
+	return stack, link, subs, prevLink.dep, targetFlag
 end
 
 -- 处理非跟踪状态的订阅者
@@ -233,21 +227,19 @@ local function processNonTrackingSubscriber(sub, targetFlag, link, subs, stack)
     if isCanPropagate then
         updateSubscriberFlags(sub, targetFlag, isCanPropagate)
 
-        -- 检查子订阅者
         local newStack, newFlag, newLink, shouldReturn = handleSubsAndCheck(sub, stack, targetFlag, link, subs)
         if shouldReturn then
             return newStack, newFlag, newLink, true
         end
 
-        -- 处理副作用队列
         handleEffectQueue(sub)
         return newStack, newFlag, newLink, false
     end
 
-    -- 如果不能传播但需要标记为脏
     if bit.band(sub.flags, targetFlag) == 0 then
         updateSubscriberFlags(sub, targetFlag, false)
     end
+
     return stack, targetFlag, link, false
 end
 
@@ -262,7 +254,6 @@ local function processTrackingSubscriber(sub, targetFlag, link, subs, stack)
         return handleSubsAndCheck(sub, stack, targetFlag, link, subs)
     end
 
-    -- 如果需要标记为脏
     if bit.band(sub.flags, targetFlag) == 0 then
         updateSubscriberFlags(sub, targetFlag, false)
     end
@@ -272,7 +263,6 @@ end
 
 -- 处理单个订阅者
 local function processSubscriber(sub, targetFlag, link, subs, stack)
-    -- 根据订阅者的跟踪状态选择处理函数
     if bit.band(sub.flags, SubscriberFlags.Tracking) == 0 then
         return processNonTrackingSubscriber(sub, targetFlag, link, subs, stack)
     else
@@ -284,22 +274,21 @@ end
 local function processSubscriberIteration(sub, stack, targetFlag, link, subs)
     local shouldReturn
     stack, targetFlag, link, shouldReturn = processSubscriber(sub, targetFlag, link, subs, stack)
+
     if shouldReturn then
         return stack, targetFlag, link, subs, false
     end
 
-    local nextSub = getNextSubscriber(subs)
+    local nextSub = subs.nextSub
     if not nextSub then
         if stack > 0 then
             local dep = subs.dep
-            repeat
-                local newStack, newFlag, newLink, newSubs, newDep, shouldReturn = processDependencyStack(stack, dep)
-                stack = newStack
-                link = newLink
-                subs = newSubs
-                dep = newDep
 
-                if shouldReturn then
+            repeat
+				local newFlag
+                stack, link, subs, dep, newFlag = processDependencyStack(stack, dep)
+
+                if newFlag then
                     targetFlag = newFlag
                     return stack, targetFlag, link, subs, false
                 end
@@ -366,7 +355,7 @@ local function processSubscriberUpdate(sub, prevLink, dirty)
     return sub, false
 end
 
-local function processDependencyStack(stack, deps, sub, dirty)
+local function handleDependencyStack(stack, deps, sub, dirty)
     local gototop = false
     global.do_func(function()
         stack = stack - 1
@@ -390,7 +379,7 @@ end
 
 local function processStackedDependencies(stack, deps, sub, dirty)
     repeat
-        local newStack, newDeps, newSub, newDirty, shouldBreak = processDependencyStack(stack, deps, sub, dirty)
+        local newStack, newDeps, newSub, newDirty, shouldBreak = handleDependencyStack(stack, deps, sub, dirty)
         stack = newStack
         deps = newDeps
         sub = newSub
