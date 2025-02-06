@@ -150,50 +150,6 @@ local function handleSubsAndCheck(sub, stack, targetFlag, link, subs)
     return stack, targetFlag, link, sub.subs ~= nil
 end
 
--- 处理单个订阅者
-local function processSubscriber(sub, targetFlag, link, subs, stack)
-    local subFlags = sub.flags
-
-    -- 处理非跟踪状态的订阅者
-    if bit.band(subFlags, SubscriberFlags.Tracking) == 0 then
-        local isCanPropagate = canPropagate(subFlags)
-        if isCanPropagate then
-            updateSubscriberFlags(sub, targetFlag, isCanPropagate)
-
-            -- 检查子订阅者
-            local newStack, newFlag, newLink, shouldReturn = handleSubsAndCheck(sub, stack, targetFlag, link, subs)
-            if shouldReturn then
-                return newStack, newFlag, newLink, true
-            end
-
-            -- 处理副作用队列
-            handleEffectQueue(sub)
-            return newStack, newFlag, newLink, false
-        end
-
-        -- 如果不能传播但需要标记为脏
-        if bit.band(sub.flags, targetFlag) == 0 then
-            updateSubscriberFlags(sub, targetFlag, false)
-        end
-        return stack, targetFlag, link, false
-    end
-
-    -- 处理跟踪状态的订阅者
-    if isValidLink(link, sub) then
-        if bit.rshift(subFlags, 2) == 0 then
-            updateSubscriberFlags(sub, bit.bor(targetFlag, SubscriberFlags.CanPropagate), false)
-            return handleSubsAndCheck(sub, stack, targetFlag, link, subs)
-        end
-
-        -- 如果需要标记为脏
-        if bit.band(sub.flags, targetFlag) == 0 then
-            updateSubscriberFlags(sub, targetFlag, false)
-        end
-    end
-    
-    return stack, targetFlag, link, false
-end
-
 -- 更新目标标志
 local function updateTargetFlag(stack, link, subs)
     if link ~= subs then
@@ -240,6 +196,59 @@ local function processDependencyStack(stack, dep)
     end
 
     return stack, nil, link, subs, prevLink.dep, false
+end
+
+-- 处理非跟踪状态的订阅者
+local function processNonTrackingSubscriber(sub, targetFlag, link, subs, stack)
+    local isCanPropagate = canPropagate(sub.flags)
+    if isCanPropagate then
+        updateSubscriberFlags(sub, targetFlag, isCanPropagate)
+
+        -- 检查子订阅者
+        local newStack, newFlag, newLink, shouldReturn = handleSubsAndCheck(sub, stack, targetFlag, link, subs)
+        if shouldReturn then
+            return newStack, newFlag, newLink, true
+        end
+
+        -- 处理副作用队列
+        handleEffectQueue(sub)
+        return newStack, newFlag, newLink, false
+    end
+
+    -- 如果不能传播但需要标记为脏
+    if bit.band(sub.flags, targetFlag) == 0 then
+        updateSubscriberFlags(sub, targetFlag, false)
+    end
+    return stack, targetFlag, link, false
+end
+
+-- 处理跟踪状态的订阅者
+local function processTrackingSubscriber(sub, targetFlag, link, subs, stack)
+    if not isValidLink(link, sub) then
+        return stack, targetFlag, link, false
+    end
+
+    if bit.rshift(sub.flags, 2) == 0 then
+        updateSubscriberFlags(sub, bit.bor(targetFlag, SubscriberFlags.CanPropagate), false)
+        return handleSubsAndCheck(sub, stack, targetFlag, link, subs)
+    end
+
+    -- 如果需要标记为脏
+    if bit.band(sub.flags, targetFlag) == 0 then
+        updateSubscriberFlags(sub, targetFlag, false)
+    end
+    
+    return stack, targetFlag, link, false
+end
+
+-- 处理单个订阅者
+local function processSubscriber(sub, targetFlag, link, subs, stack)
+    -- 根据订阅者的跟踪状态选择处理函数
+    if bit.band(sub.flags, SubscriberFlags.Tracking) == 0 then
+        return processNonTrackingSubscriber(sub, targetFlag, link, subs, stack)
+    else
+        return processTrackingSubscriber(sub, targetFlag, link, subs, stack)
+    end
 end
 
 -- 处理订阅者迭代
