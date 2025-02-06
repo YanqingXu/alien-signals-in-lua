@@ -496,56 +496,79 @@ local function checkDirty(deps)
     return dirty
 end
 
+-- 更新订阅者链接
+local function updateSubscriberLinks(link, nextSub, prevSub, dep)
+    if nextSub then
+        nextSub.prevSub = prevSub
+        link.nextSub = nil
+    else
+        dep.subsTail = prevSub
+        if dep.lastTrackedId then
+            dep.lastTrackedId = 0
+        end
+    end
+
+    if prevSub then
+        prevSub.nextSub = nextSub
+        link.prevSub = nil
+    else
+        dep.subs = nextSub
+    end
+end
+
+-- 回收链接到池中
+local function recycleLinkToPool(link)
+    link.dep = nil
+    link.sub = nil
+    link.nextDep = global.linkPool
+    global.linkPool = link
+end
+
+-- 处理依赖的清理
+local function cleanupDependency(dep, depDeps, nextDep)
+    if not dep.subs and dep.deps then
+        -- 更新标志
+        if dep.notify then
+            dep.flags = SubscriberFlags.None
+        else
+            dep.flags = bit.bor(dep.flags, SubscriberFlags.Dirty)
+        end
+
+        -- 处理依赖链接
+        if depDeps then
+            dep.depsTail.nextDep = nextDep
+            dep.deps = nil
+            dep.depsTail = nil
+            return depDeps
+        end
+    end
+    return nextDep
+end
+
+-- 清理跟踪链接
 local function clearTrack(link)
-	repeat
-		global.do_func(function()
-			local dep = link.dep
-			local nextDep = link.nextDep
-			local nextSub = link.nextSub
-			local prevSub = link.prevSub
+    while link do
+        local nextLink = nil
+        global.do_func(function()
+            local dep = link.dep
+            local nextDep = link.nextDep
+            local nextSub = link.nextSub
+            local prevSub = link.prevSub
 
-			if nextSub then
-				nextSub.prevSub = prevSub
-				link.nextSub = nil
-			else
-				dep.subsTail = prevSub
-				if dep.lastTrackedId then
-					dep.lastTrackedId = 0
-				end
-			end
+            -- 更新订阅者链接
+            updateSubscriberLinks(link, nextSub, prevSub, dep)
 
-			if prevSub then
-				prevSub.nextSub = nextSub
-				link.prevSub = nil
-			else
-				dep.subs = nextSub
-			end
+            -- 回收当前链接
+            recycleLinkToPool(link)
 
-			link.dep = nil
-			link.sub = nil
-			link.nextDep = global.linkPool
-			global.linkPool = link
-
-			if not dep.subs and dep.deps then
-				if dep.notify then
-					dep.flags = SubscriberFlags.None
-				else
-					dep.flags = bit.bor(dep.flags, SubscriberFlags.Dirty)
-				end
-
-				local depDeps = dep.deps
-				if depDeps then
-					link = depDeps
-					dep.depsTail.nextDep = nextDep
-					dep.deps = nil
-					dep.depsTail = nil
-					return
-				end
-			end
-
-			link = nextDep
-		end)
-	until not link
+            -- 处理依赖清理
+            nextLink = cleanupDependency(dep, dep.deps, nextDep)
+            if not nextLink then
+                nextLink = nextDep
+            end
+        end)
+        link = nextLink
+    end
 end
 
 local function startTrack(sub)
