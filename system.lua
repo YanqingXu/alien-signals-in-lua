@@ -194,38 +194,75 @@ local function processSubscriber(sub, targetFlag, link, subs, stack)
     return stack, targetFlag, link, false
 end
 
+-- 更新目标标志
+local function updateTargetFlag(stack, link, subs)
+    if link ~= subs then
+        if stack > 0 then
+            return SubscriberFlags.ToCheckDirty
+        end
+        return SubscriberFlags.Dirty
+    end
+    return nil
+end
+
+-- 获取下一个订阅者
+local function getNextSubscriber(subs)
+    return subs.nextSub
+end
+
+-- 更新订阅者状态
+local function updateSubscriberState(nextSub, stack, link, subs)
+    -- 更新目标标志
+    local newFlag = updateTargetFlag(stack, link, subs)
+    
+    -- 更新订阅者和链接
+    subs = nextSub
+    link = nextSub
+    
+    return subs, link, newFlag
+end
+
 -- 主传播函数
 local function propagate(subs)
-    local targetFlag = SubscriberFlags.Dirty
-    local link = subs
-    local stack = 0
-    local nextSub = nil
+    -- 初始状态
+    local targetFlag = SubscriberFlags.Dirty  -- 状态1: 初始化目标标志
+    local link = subs                         -- 状态2: 初始化链接
+    local stack = 0                           -- 状态3: 初始化栈
+    local nextSub = nil                       -- 状态4: 初始化下一个订阅者
 
     repeat
         local bBreak = false
         global.do_func(function()
-            local sub = link.sub
+            local sub = link.sub              -- 状态5: 获取当前订阅者
             
             -- 处理当前订阅者
             local shouldReturn
+            -- 状态6: 更新订阅者状态
             stack, targetFlag, link, shouldReturn = processSubscriber(sub, targetFlag, link, subs, stack)
             if shouldReturn then
+                -- 状态7: 提前返回，保持当前状态
                 return
             end
 
-            nextSub = subs.nextSub
+            -- 状态8: 准备处理下一个订阅者
+            nextSub = getNextSubscriber(subs)
             if not nextSub then
                 if stack > 0 then
+                    -- 状态9: 开始处理依赖栈
                     local dep = subs.dep
                     repeat
+                        -- 状态10: 栈回退
                         stack = stack - 1
                         local depSubs = dep.subs
                         local prevLink = depSubs.prevSub
+                        -- 状态11: 清理前一个链接
                         depSubs.prevSub = nil
+                        -- 状态12: 更新订阅者和链接
                         subs = prevLink.nextSub
                         link = subs
 
                         if subs then
+                            -- 状态13: 更新目标标志
                             targetFlag = SubscriberFlags.Dirty
                             if stack > 0 then
                                 targetFlag = SubscriberFlags.ToCheckDirty
@@ -233,29 +270,31 @@ local function propagate(subs)
                             return -- do_func return
                         end
 
+                        -- 状态14: 继续处理依赖
                         dep = prevLink.dep
                     until stack <= 0
                 end
+                -- 状态15: 处理完所有依赖，准备退出
                 bBreak = true
                 return
             end
 
-            if link ~= subs then
-                targetFlag = SubscriberFlags.Dirty
-                if stack > 0 then
-                    targetFlag = SubscriberFlags.ToCheckDirty
-                end
+            -- 状态16-17: 更新订阅者状态
+            local newSubs, newLink, newFlag = updateSubscriberState(nextSub, stack, link, subs)
+            subs = newSubs
+            link = newLink
+            if newFlag then
+                targetFlag = newFlag
             end
-
-            subs = nextSub
-            link = subs
         end)
 
+        -- 状态18: 检查是否需要退出循环
         if bBreak then
             break
         end
     until false
 
+    -- 状态19: 处理队列中的效果
     if global.batchDepth <= 0 then
         global.drainQueuedEffects()
     end
