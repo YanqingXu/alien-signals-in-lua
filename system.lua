@@ -410,68 +410,88 @@ local function processDependencyStack(stack, deps, sub, dirty)
     return stack, deps, sub, dirty, gototop
 end
 
+-- 处理依赖检查的一次迭代
+local function processDependencyCheck(deps, stack)
+    local dirty = false
+    local nextDep = nil
+    local shouldReturn = false
+    local shouldGotoTop = false
+
+    global.do_func(function()
+        -- 检查依赖更新
+        local dep = deps.dep
+        local isDirty, needsCheck = checkDependencyUpdate(dep, deps)
+        
+        if needsCheck then
+            -- 需要检查子依赖
+            dep.subs.prevSub = deps
+            deps = dep.deps
+            stack = stack + 1
+            shouldReturn = true
+            return
+        end
+
+        dirty = isDirty
+        if not dirty then
+            nextDep = deps.nextDep
+        end
+
+        -- 处理栈
+        if dirty or not nextDep then
+            if stack > 0 then
+                local sub = deps.sub
+                repeat
+                    local newStack, newDeps, newSub, newDirty, shouldGotoTop = processDependencyStack(stack, deps, sub, dirty)
+                    stack = newStack
+                    deps = newDeps
+                    sub = newSub
+                    dirty = newDirty
+
+                    if shouldGotoTop then
+                        shouldGotoTop = true
+                        break
+                    end
+                until stack <= 0
+
+                if shouldGotoTop then
+                    shouldReturn = true
+                    return
+                end
+            end
+
+            shouldReturn = true
+            return
+        end
+
+        deps = nextDep
+    end)
+
+    return deps, stack, dirty, shouldReturn, shouldGotoTop
+end
+
 -- 检查依赖是否脏
 local function checkDirty(deps)
     local stack = 0
     local dirty = false
-    local nextDep = nil
 
-    repeat
-        local gototop = false
-        local returned = false
-        global.do_func(function()
-            dirty = false
-
-            -- 检查依赖更新
-            local dep = deps.dep
-            local isDirty, needsCheck = checkDependencyUpdate(dep, deps)
-            
-            if needsCheck then
-                -- 需要检查子依赖
-                dep.subs.prevSub = deps
-                deps = dep.deps
-                stack = stack + 1
-                return
+    while deps do
+        -- 处理一次依赖检查迭代
+        local newDeps, newStack, isDirty, shouldReturn, shouldGotoTop = processDependencyCheck(deps, stack)
+        
+        -- 更新状态
+        deps = newDeps
+        stack = newStack
+        
+        -- 处理返回条件
+        if shouldReturn then
+            if not shouldGotoTop then
+                return isDirty
             end
-
-            dirty = isDirty
-            if not dirty then
-                nextDep = deps.nextDep
-            end
-
-            -- 处理栈
-            if dirty or not nextDep then
-                if stack > 0 then
-                    local sub = deps.sub
-                    repeat
-                        local newStack, newDeps, newSub, newDirty, shouldGotoTop = processDependencyStack(stack, deps, sub, dirty)
-                        stack = newStack
-                        deps = newDeps
-                        sub = newSub
-                        dirty = newDirty
-
-                        if shouldGotoTop then
-                            gototop = true
-                            break
-                        end
-                    until stack <= 0
-
-                    if gototop then
-                        return
-                    end
-                end
-
-                returned = true
-                return
-            end
-
-            deps = nextDep
-        end)
-
-        if returned then
-            return dirty
         end
-    until not deps
+
+        -- 更新脏状态
+        dirty = isDirty or dirty
+    end
 
     return dirty
 end
