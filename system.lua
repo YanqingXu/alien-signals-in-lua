@@ -287,7 +287,7 @@ local function processSubscriberIteration(sub, stack, targetFlag, link, subs)
     stack, targetFlag, link, shouldReturn = processSubscriber(sub, targetFlag, link, subs, stack)
     if shouldReturn then
         -- 返回时机1: 订阅者处理要求提前返回
-        return stack, targetFlag, link, subs, false, true
+        return stack, targetFlag, link, subs, false
     end
 
     -- 获取下一个订阅者
@@ -306,12 +306,12 @@ local function processSubscriberIteration(sub, stack, targetFlag, link, subs)
                 if shouldReturn then
                     -- 返回时机2: 找到有效的依赖订阅者
                     targetFlag = newFlag
-                    return stack, targetFlag, link, subs, false, true
+                    return stack, targetFlag, link, subs, false
                 end
             until stack <= 0
         end
         -- 返回时机3: 没有下一个订阅者且栈为空
-        return stack, targetFlag, link, subs, true, true
+        return stack, targetFlag, link, subs, true
     end
 
     -- 路径3: 处理下一个订阅者
@@ -321,7 +321,7 @@ local function processSubscriberIteration(sub, stack, targetFlag, link, subs)
     end
 
     -- 返回时机4: 正常执行完成
-    return stack, targetFlag, newLink, newSubs, false, false
+    return stack, targetFlag, newLink, newSubs, false
 end
 
 -- 主传播函数
@@ -333,16 +333,8 @@ local function propagate(subs)
 
     repeat
         local shouldBreak = false
-        local shouldReturn = false
-
-        -- 包装每次迭代的执行
-        global.do_func(function()
-            local sub = link.sub
-            stack, targetFlag, link, subs, shouldBreak, shouldReturn = processSubscriberIteration(sub, stack, targetFlag, link, subs)
-            if shouldReturn then
-                return
-            end
-        end)
+        local sub = link.sub
+        stack, targetFlag, link, subs, shouldBreak = processSubscriberIteration(sub, stack, targetFlag, link, subs)
 
         if shouldBreak then break end
     until false
@@ -571,24 +563,30 @@ local function clearTrack(link)
     end
 end
 
+-- 清理订阅者的依赖
+local function cleanupSubscriberDeps(sub)
+    local depsTail = sub.depsTail
+    if depsTail then
+        if depsTail.nextDep then
+            clearTrack(depsTail.nextDep)
+            depsTail.nextDep = nil
+        end
+    elseif sub.deps then
+        clearTrack(sub.deps)
+        sub.deps = nil
+    end
+end
+
+-- 开始跟踪订阅者
 local function startTrack(sub)
-	sub.depsTail = nil
+    sub.depsTail = nil
     sub.flags = SubscriberFlags.Tracking
 end
 
+-- 结束跟踪订阅者
 local function endTrack(sub)
-	local depsTail = sub.depsTail
-	if depsTail then
-		if depsTail.nextDep then
-			clearTrack(depsTail.nextDep)
-			depsTail.nextDep = nil
-		end
-	elseif sub.deps then
-		clearTrack(sub.deps)
-		sub.deps = nil
-	end
-
-	sub.flags = bit.band(sub.flags, bit.bnot(SubscriberFlags.Tracking))
+    cleanupSubscriberDeps(sub)
+    sub.flags = bit.band(sub.flags, bit.bnot(SubscriberFlags.Tracking))
 end
 
 return {
