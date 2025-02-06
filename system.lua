@@ -242,69 +242,74 @@ local function processDependencyStack(stack, dep)
     return stack, nil, link, subs, prevLink.dep, false
 end
 
+-- 处理订阅者迭代
+local function processSubscriberIteration(sub, stack, targetFlag, link, subs)
+    -- 路径1: 处理当前订阅者
+    local shouldReturn
+    stack, targetFlag, link, shouldReturn = processSubscriber(sub, targetFlag, link, subs, stack)
+    if shouldReturn then
+        -- 返回时机1: 订阅者处理要求提前返回
+        return stack, targetFlag, link, subs, false, true
+    end
+
+    -- 获取下一个订阅者
+    local nextSub = getNextSubscriber(subs)
+    if not nextSub then
+        -- 路径2: 处理依赖栈
+        if stack > 0 then
+            local dep = subs.dep
+            repeat
+                local newStack, newFlag, newLink, newSubs, newDep, shouldReturn = processDependencyStack(stack, dep)
+                stack = newStack
+                link = newLink
+                subs = newSubs
+                dep = newDep
+
+                if shouldReturn then
+                    -- 返回时机2: 找到有效的依赖订阅者
+                    targetFlag = newFlag
+                    return stack, targetFlag, link, subs, false, true
+                end
+            until stack <= 0
+        end
+        -- 返回时机3: 没有下一个订阅者且栈为空
+        return stack, targetFlag, link, subs, true, true
+    end
+
+    -- 路径3: 处理下一个订阅者
+    local newSubs, newLink, newFlag = updateSubscriberState(nextSub, stack, link, subs)
+    if newFlag then
+        targetFlag = newFlag
+    end
+
+    -- 返回时机4: 正常执行完成
+    return stack, targetFlag, newLink, newSubs, false, false
+end
+
 -- 主传播函数
 local function propagate(subs)
     -- 初始状态
-    local targetFlag = SubscriberFlags.Dirty  -- 状态1: 初始化目标标志
-    local link = subs                         -- 状态2: 初始化链接
-    local stack = 0                           -- 状态3: 初始化栈
-    local nextSub = nil                       -- 状态4: 初始化下一个订阅者
+    local targetFlag = SubscriberFlags.Dirty
+    local link = subs
+    local stack = 0
 
     repeat
-        local bBreak = false
+        local shouldBreak = false
+        local shouldReturn = false
+
+        -- 包装每次迭代的执行
         global.do_func(function()
-            local sub = link.sub              -- 状态5: 获取当前订阅者
-            
-            -- 处理当前订阅者
-            local shouldReturn
-            -- 状态6: 更新订阅者状态
-            stack, targetFlag, link, shouldReturn = processSubscriber(sub, targetFlag, link, subs, stack)
+            local sub = link.sub
+            stack, targetFlag, link, subs, shouldBreak, shouldReturn = processSubscriberIteration(sub, stack, targetFlag, link, subs)
             if shouldReturn then
-                -- 状态7: 提前返回，保持当前状态
                 return
-            end
-
-            -- 状态8: 准备处理下一个订阅者
-            nextSub = getNextSubscriber(subs)
-            if not nextSub then
-                if stack > 0 then
-                    -- 状态9: 开始处理依赖栈
-                    local dep = subs.dep
-                    repeat
-                        -- 处理依赖栈并获取新状态
-                        local newStack, newFlag, newLink, newSubs, newDep, shouldReturn = processDependencyStack(stack, dep)
-                        stack = newStack
-                        link = newLink
-                        subs = newSubs
-                        dep = newDep
-
-                        if shouldReturn then
-                            targetFlag = newFlag
-                            return -- 保持原有的返回时机
-                        end
-                    until stack <= 0
-                end
-                -- 状态15: 处理完所有依赖，准备退出
-                bBreak = true
-                return
-            end
-
-            -- 状态16-17: 更新订阅者状态
-            local newSubs, newLink, newFlag = updateSubscriberState(nextSub, stack, link, subs)
-            subs = newSubs
-            link = newLink
-            if newFlag then
-                targetFlag = newFlag
             end
         end)
 
-        -- 状态18: 检查是否需要退出循环
-        if bBreak then
-            break
-        end
+        if shouldBreak then break end
     until false
 
-    -- 状态19: 处理队列中的效果
+    -- 处理队列中的效果
     if global.batchDepth <= 0 then
         global.drainQueuedEffects()
     end
