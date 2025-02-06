@@ -75,6 +75,155 @@ local function _link(dep, sub)
     return linkNewDep(dep, sub, nextDep, currentDep)
 end
 
+local function isValidLink(subLink, sub)
+    local depsTail = sub.depsTail
+    if not depsTail then
+        return false
+    end
+
+    local link = sub.deps
+    repeat
+        if link == subLink then
+            return true
+        end
+
+        if link == depsTail then
+            break
+        end
+
+        link = link.nextDep
+    until not link
+
+    return false
+end
+
+local function checkSubs(sub, link, subs, stack, targetFlag)
+	local subSubs = sub.subs
+	if subSubs then
+		targetFlag = SubscriberFlags.ToCheckDirty
+		if subSubs.nextSub then
+			subSubs.prevSub = subs
+			subs = subSubs
+			link = subs
+			stack = stack + 1
+		else
+			link = subSubs
+			if sub.notify then
+				targetFlag = SubscriberFlags.RunInnerEffects
+			end
+		end
+	end
+
+	return stack, targetFlag, link
+end
+
+-- 检查是否可以传播更新
+local function canPropagateUpdate(sub)
+    local subFlags = sub.flags
+    if bit.rshift(subFlags, 2) == 0 then
+        return true
+    end
+    if bit.band(subFlags, SubscriberFlags.CanPropagate) > 0 then
+        sub.flags = bit.band(sub.flags, bit.bnot(SubscriberFlags.CanPropagate))
+        return true
+    end
+    return false
+end
+
+-- 将订阅者标记为脏
+local function markAsDirty(sub, flag)
+    sub.flags = bit.bor(sub.flags, flag)
+end
+
+-- 将效果添加到队列
+local function queueEffect(sub)
+    if not sub.notify then return end
+    if global.queuedEffectsTail then
+        global.queuedEffectsTail.nextNotify = sub
+    else
+        global.queuedEffects = sub
+    end
+    global.queuedEffectsTail = sub
+end
+
+-- 主传播函数
+local function propagate(subs)
+    local targetFlag = SubscriberFlags.Dirty
+    local link = subs
+    local stack = 0
+    local nextSub = nil
+
+    repeat
+        local bBreak = false
+        global.do_func(function()
+            local sub = link.sub
+            local subFlags = sub.flags
+
+            -- 处理非跟踪状态的订阅者
+            if bit.band(subFlags, SubscriberFlags.Tracking) == 0 then
+                if canPropagateUpdate(sub) then
+                    markAsDirty(sub, targetFlag)
+                    stack, targetFlag, link = checkSubs(sub, link, subs, stack, targetFlag)
+                    if sub.subs then return end
+                    queueEffect(sub)
+                elseif bit.band(sub.flags, targetFlag) == 0 then
+                    markAsDirty(sub, targetFlag)
+                end
+
+            -- 处理跟踪状态的订阅者
+            elseif isValidLink(link, sub) then
+                if bit.rshift(subFlags, 2) == 0 then
+                    markAsDirty(sub, bit.bor(targetFlag, SubscriberFlags.CanPropagate))
+                    stack, targetFlag, link = checkSubs(sub, link, subs, stack, targetFlag)
+                    if sub.subs then return end
+                elseif bit.band(sub.flags, targetFlag) == 0 then
+                    markAsDirty(sub, targetFlag)
+                end
+            end
+
+            -- 处理下一个订阅者
+            nextSub = subs.nextSub
+            if not nextSub then
+                if stack > 0 then
+                    local dep = subs.dep
+                    repeat
+                        stack = stack - 1
+                        local depSubs = dep.subs
+                        local prevLink = depSubs.prevSub
+                        depSubs.prevSub = nil
+                        subs = prevLink.nextSub
+                        link = subs
+
+                        if subs then
+                            targetFlag = stack > 0 and SubscriberFlags.ToCheckDirty or SubscriberFlags.Dirty
+                            return
+                        end
+
+                        dep = prevLink.dep
+                    until stack <= 0
+                end
+                bBreak = true
+                return
+            end
+
+            -- 更新目标标志
+            if link ~= subs then
+                targetFlag = stack > 0 and SubscriberFlags.ToCheckDirty or SubscriberFlags.Dirty
+            end
+
+            subs = nextSub
+            link = subs
+        end)
+
+        if bBreak then break end
+    until false
+
+    -- 处理队列中的效果
+    if global.batchDepth <= 0 then
+        global.drainQueuedEffects()
+    end
+end
+
 local function clearTrack(link)
 	repeat
 		global.do_func(function()
@@ -125,145 +274,6 @@ local function clearTrack(link)
 			link = nextDep
 		end)
 	until not link
-end
-
-local function isValidLink(subLink, sub)
-    local depsTail = sub.depsTail
-    if not depsTail then
-        return false
-    end
-
-    local link = sub.deps
-    repeat
-        if link == subLink then
-            return true
-        end
-
-        if link == depsTail then
-            break
-        end
-
-        link = link.nextDep
-    until not link
-
-    return false
-end
-
-local function checkSubs(sub, link, subs, stack, targetFlag)
-	local subSubs = sub.subs
-	if subSubs then
-		targetFlag = SubscriberFlags.ToCheckDirty
-		if subSubs.nextSub then
-			subSubs.prevSub = subs
-			subs = subSubs
-			link = subs
-			stack = stack + 1
-		else
-			link = subSubs
-			if sub.notify then
-				targetFlag = SubscriberFlags.RunInnerEffects
-			end
-		end
-	end
-
-	return stack, targetFlag, link
-end
-
-local function propagate(subs)
-    local targetFlag = SubscriberFlags.Dirty
-    local link = subs
-    local stack = 0
-	local nextSub = nil
-
-    repeat
-		local bBreak = false
-		global.do_func(function()
-			local sub = link.sub
-			local subFlags = sub.flags
-
-			if bit.band(subFlags, SubscriberFlags.Tracking) == 0 then
-				local canPropagate = bit.rshift(subFlags, 2) == 0
-				if not canPropagate and bit.band(subFlags, SubscriberFlags.CanPropagate) > 0 then
-					sub.flags = bit.band(sub.flags, bit.bnot(SubscriberFlags.CanPropagate))
-					canPropagate = true
-				end
-
-				if canPropagate then
-					sub.flags = bit.bor(sub.flags, targetFlag)
-					stack, targetFlag, link = checkSubs(sub, link, subs, stack, targetFlag)
-					if sub.subs then
-						return
-					end
-
-					if sub.notify then
-						if global.queuedEffectsTail then
-							global.queuedEffectsTail.nextNotify = sub
-						else
-							global.queuedEffects = sub
-						end
-						global.queuedEffectsTail = sub
-					end
-				elseif bit.band(sub.flags, targetFlag) == 0 then
-					sub.flags = bit.bor(sub.flags, targetFlag)
-				end
-			elseif isValidLink(link, sub) then
-				if bit.rshift(subFlags, 2) == 0 then
-					sub.flags = bit.bor(sub.flags, bit.bor(targetFlag, SubscriberFlags.CanPropagate))
-					stack, targetFlag, link = checkSubs(sub, link, subs, stack, targetFlag)
-					if sub.subs then
-						return
-					end
-				elseif bit.band(sub.flags, targetFlag) == 0 then
-					sub.flags = bit.bor(sub.flags, targetFlag)
-				end
-			end
-
-			nextSub = subs.nextSub
-			if not nextSub then
-				if stack > 0 then
-					local dep = subs.dep
-					repeat
-						stack = stack - 1
-						local depSubs = dep.subs
-						local prevLink = depSubs.prevSub
-						depSubs.prevSub = nil
-						subs = prevLink.nextSub
-						link = subs
-
-						if subs then
-							targetFlag = SubscriberFlags.Dirty
-							if stack > 0 then
-								targetFlag = SubscriberFlags.ToCheckDirty
-							end
-							return -- do_func return
-						end
-
-						dep = prevLink.dep
-					until stack <= 0
-				end
-				bBreak = true
-				return
-			end
-
-			if link ~= subs then
-				targetFlag = SubscriberFlags.Dirty
-				if stack > 0 then
-					targetFlag = SubscriberFlags.ToCheckDirty
-				end
-			end
-
-			subs = nextSub
-			link = subs
-		end)
-
-		if bBreak then
-			break
-		end
-    until false
-
-    if global.batchDepth <= 0 then
-        global.drainQueuedEffects()
-    end
 end
 
 local function startTrack(sub)
