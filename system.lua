@@ -282,18 +282,14 @@ end
 
 -- 处理订阅者迭代
 local function processSubscriberIteration(sub, stack, targetFlag, link, subs)
-    -- 路径1: 处理当前订阅者
     local shouldReturn
     stack, targetFlag, link, shouldReturn = processSubscriber(sub, targetFlag, link, subs, stack)
     if shouldReturn then
-        -- 返回时机1: 订阅者处理要求提前返回
         return stack, targetFlag, link, subs, false
     end
 
-    -- 获取下一个订阅者
     local nextSub = getNextSubscriber(subs)
     if not nextSub then
-        -- 路径2: 处理依赖栈
         if stack > 0 then
             local dep = subs.dep
             repeat
@@ -304,29 +300,23 @@ local function processSubscriberIteration(sub, stack, targetFlag, link, subs)
                 dep = newDep
 
                 if shouldReturn then
-                    -- 返回时机2: 找到有效的依赖订阅者
                     targetFlag = newFlag
                     return stack, targetFlag, link, subs, false
                 end
             until stack <= 0
         end
-        -- 返回时机3: 没有下一个订阅者且栈为空
         return stack, targetFlag, link, subs, true
     end
 
-    -- 路径3: 处理下一个订阅者
     local newSubs, newLink, newFlag = updateSubscriberState(nextSub, stack, link, subs)
     if newFlag then
         targetFlag = newFlag
     end
 
-    -- 返回时机4: 正常执行完成
     return stack, targetFlag, newLink, newSubs, false
 end
 
--- 主传播函数
 local function propagate(subs)
-    -- 初始状态
     local targetFlag = SubscriberFlags.Dirty
     local link = subs
     local stack = 0
@@ -339,13 +329,11 @@ local function propagate(subs)
         if shouldBreak then break end
     until false
 
-    -- 处理队列中的效果
     if global.batchDepth <= 0 then
         global.drainQueuedEffects()
     end
 end
 
--- 检查依赖是否需要更新
 local function checkDependencyUpdate(dep, deps)
     if not dep.update then
         return false
@@ -361,13 +349,12 @@ local function checkDependencyUpdate(dep, deps)
     end
 
     if bit.band(depFlags, SubscriberFlags.ToCheckDirty) > 0 then
-        return nil, true -- 需要检查子依赖
+        return nil, true
     end
 
     return false
 end
 
--- 处理子订阅者更新
 local function processSubscriberUpdate(sub, prevLink, dirty)
     if dirty then
         if sub.update() then
@@ -379,7 +366,6 @@ local function processSubscriberUpdate(sub, prevLink, dirty)
     return sub, false
 end
 
--- 处理依赖栈
 local function processDependencyStack(stack, deps, sub, dirty)
     local gototop = false
     global.do_func(function()
@@ -402,7 +388,28 @@ local function processDependencyStack(stack, deps, sub, dirty)
     return stack, deps, sub, dirty, gototop
 end
 
--- 处理依赖检查的一次迭代
+local function handleDependencyStackUpdate(stack, deps, sub, dirty)
+    local newStack, newDeps, newSub, newDirty, shouldGotoTop = processDependencyStack(stack, deps, sub, dirty)
+    if shouldGotoTop then
+        return newStack, newDeps, newSub, newDirty, true
+    end
+    return newStack, newDeps, newSub, newDirty, false
+end
+
+local function processStackedDependencies(stack, deps, sub, dirty)
+    repeat
+        local newStack, newDeps, newSub, newDirty, shouldBreak = handleDependencyStackUpdate(stack, deps, sub, dirty)
+        stack = newStack
+        deps = newDeps
+        sub = newSub
+        dirty = newDirty
+        if shouldBreak then
+            return stack, deps, sub, dirty, true
+        end
+    until stack <= 0
+    return stack, deps, sub, dirty, false
+end
+
 local function processDependencyCheck(deps, stack)
     local dirty = false
     local nextDep = nil
@@ -410,12 +417,10 @@ local function processDependencyCheck(deps, stack)
     local shouldGotoTop = false
 
     global.do_func(function()
-        -- 检查依赖更新
         local dep = deps.dep
         local isDirty, needsCheck = checkDependencyUpdate(dep, deps)
-        
+
         if needsCheck then
-            -- 需要检查子依赖
             dep.subs.prevSub = deps
             deps = dep.deps
             stack = stack + 1
@@ -428,29 +433,15 @@ local function processDependencyCheck(deps, stack)
             nextDep = deps.nextDep
         end
 
-        -- 处理栈
         if dirty or not nextDep then
             if stack > 0 then
                 local sub = deps.sub
-                repeat
-                    local newStack, newDeps, newSub, newDirty, shouldGotoTop = processDependencyStack(stack, deps, sub, dirty)
-                    stack = newStack
-                    deps = newDeps
-                    sub = newSub
-                    dirty = newDirty
-
-                    if shouldGotoTop then
-                        shouldGotoTop = true
-                        break
-                    end
-                until stack <= 0
-
+                stack, deps, sub, dirty, shouldGotoTop = processStackedDependencies(stack, deps, sub, dirty)
                 if shouldGotoTop then
                     shouldReturn = true
                     return
                 end
             end
-
             shouldReturn = true
             return
         end
@@ -461,34 +452,28 @@ local function processDependencyCheck(deps, stack)
     return deps, stack, dirty, shouldReturn, shouldGotoTop
 end
 
--- 检查依赖是否脏
 local function checkDirty(deps)
     local stack = 0
     local dirty = false
 
     while deps do
-        -- 处理一次依赖检查迭代
         local newDeps, newStack, isDirty, shouldReturn, shouldGotoTop = processDependencyCheck(deps, stack)
-        
-        -- 更新状态
+
         deps = newDeps
         stack = newStack
-        
-        -- 处理返回条件
+
         if shouldReturn then
             if not shouldGotoTop then
                 return isDirty
             end
         end
 
-        -- 更新脏状态
         dirty = isDirty or dirty
     end
 
     return dirty
 end
 
--- 更新订阅者链接
 local function updateSubscriberLinks(link, nextSub, prevSub, dep)
     if nextSub then
         nextSub.prevSub = prevSub
@@ -508,7 +493,6 @@ local function updateSubscriberLinks(link, nextSub, prevSub, dep)
     end
 end
 
--- 回收链接到池中
 local function recycleLinkToPool(link)
     link.dep = nil
     link.sub = nil
@@ -516,17 +500,14 @@ local function recycleLinkToPool(link)
     global.linkPool = link
 end
 
--- 处理依赖的清理
 local function cleanupDependency(dep, depDeps, nextDep)
     if not dep.subs and dep.deps then
-        -- 更新标志
         if dep.notify then
             dep.flags = SubscriberFlags.None
         else
             dep.flags = bit.bor(dep.flags, SubscriberFlags.Dirty)
         end
 
-        -- 处理依赖链接
         if depDeps then
             dep.depsTail.nextDep = nextDep
             dep.deps = nil
@@ -537,7 +518,6 @@ local function cleanupDependency(dep, depDeps, nextDep)
     return nextDep
 end
 
--- 清理跟踪链接
 local function clearTrack(link)
     while link do
         local nextLink = nil
@@ -547,13 +527,10 @@ local function clearTrack(link)
             local nextSub = link.nextSub
             local prevSub = link.prevSub
 
-            -- 更新订阅者链接
             updateSubscriberLinks(link, nextSub, prevSub, dep)
 
-            -- 回收当前链接
             recycleLinkToPool(link)
 
-            -- 处理依赖清理
             nextLink = cleanupDependency(dep, dep.deps, nextDep)
             if not nextLink then
                 nextLink = nextDep
@@ -563,7 +540,6 @@ local function clearTrack(link)
     end
 end
 
--- 清理订阅者的依赖
 local function cleanupSubscriberDeps(sub)
     local depsTail = sub.depsTail
     if depsTail then
@@ -577,13 +553,11 @@ local function cleanupSubscriberDeps(sub)
     end
 end
 
--- 开始跟踪订阅者
 local function startTrack(sub)
     sub.depsTail = nil
     sub.flags = SubscriberFlags.Tracking
 end
 
--- 结束跟踪订阅者
 local function endTrack(sub)
     cleanupSubscriberDeps(sub)
     sub.flags = bit.band(sub.flags, bit.bnot(SubscriberFlags.Tracking))
