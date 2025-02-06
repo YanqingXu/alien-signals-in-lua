@@ -117,26 +117,24 @@ local function checkSubs(sub, link, subs, stack, targetFlag)
 	return stack, targetFlag, link
 end
 
--- 检查是否可以传播更新
-local function canPropagateUpdate(sub)
-    local subFlags = sub.flags
+-- 检查订阅者是否可以传播更新
+local function canPropagate(subFlags)
     if bit.rshift(subFlags, 2) == 0 then
         return true
     end
-    if bit.band(subFlags, SubscriberFlags.CanPropagate) > 0 then
+    return bit.band(subFlags, SubscriberFlags.CanPropagate) > 0
+end
+
+-- 更新订阅者的标志
+local function updateSubscriberFlags(sub, targetFlag, isCanPropagate)
+    if isCanPropagate then
         sub.flags = bit.band(sub.flags, bit.bnot(SubscriberFlags.CanPropagate))
-        return true
     end
-    return false
+    sub.flags = bit.bor(sub.flags, targetFlag)
 end
 
--- 将订阅者标记为脏
-local function markAsDirty(sub, flag)
-    sub.flags = bit.bor(sub.flags, flag)
-end
-
--- 将效果添加到队列
-local function queueEffect(sub)
+-- 处理副作用队列
+local function handleEffectQueue(sub)
     if not sub.notify then return end
     if global.queuedEffectsTail then
         global.queuedEffectsTail.nextNotify = sub
@@ -144,6 +142,56 @@ local function queueEffect(sub)
         global.queuedEffects = sub
     end
     global.queuedEffectsTail = sub
+end
+
+-- 处理子订阅者并检查返回条件
+local function handleSubsAndCheck(sub, stack, targetFlag, link, subs)
+    stack, targetFlag, link = checkSubs(sub, link, subs, stack, targetFlag)
+    return stack, targetFlag, link, sub.subs ~= nil
+end
+
+-- 处理单个订阅者
+local function processSubscriber(sub, targetFlag, link, subs, stack)
+    local subFlags = sub.flags
+
+    -- 处理非跟踪状态的订阅者
+    if bit.band(subFlags, SubscriberFlags.Tracking) == 0 then
+        local isCanPropagate = canPropagate(subFlags)
+        if isCanPropagate then
+            updateSubscriberFlags(sub, targetFlag, isCanPropagate)
+
+            -- 检查子订阅者
+            local newStack, newFlag, newLink, shouldReturn = handleSubsAndCheck(sub, stack, targetFlag, link, subs)
+            if shouldReturn then
+                return newStack, newFlag, newLink, true
+            end
+
+            -- 处理副作用队列
+            handleEffectQueue(sub)
+            return newStack, newFlag, newLink, false
+        end
+
+        -- 如果不能传播但需要标记为脏
+        if bit.band(sub.flags, targetFlag) == 0 then
+            updateSubscriberFlags(sub, targetFlag, false)
+        end
+        return stack, targetFlag, link, false
+    end
+
+    -- 处理跟踪状态的订阅者
+    if isValidLink(link, sub) then
+        if bit.rshift(subFlags, 2) == 0 then
+            updateSubscriberFlags(sub, bit.bor(targetFlag, SubscriberFlags.CanPropagate), false)
+            return handleSubsAndCheck(sub, stack, targetFlag, link, subs)
+        end
+
+        -- 如果需要标记为脏
+        if bit.band(sub.flags, targetFlag) == 0 then
+            updateSubscriberFlags(sub, targetFlag, false)
+        end
+    end
+    
+    return stack, targetFlag, link, false
 end
 
 -- 主传播函数
@@ -157,31 +205,14 @@ local function propagate(subs)
         local bBreak = false
         global.do_func(function()
             local sub = link.sub
-            local subFlags = sub.flags
-
-            -- 处理非跟踪状态的订阅者
-            if bit.band(subFlags, SubscriberFlags.Tracking) == 0 then
-                if canPropagateUpdate(sub) then
-                    markAsDirty(sub, targetFlag)
-                    stack, targetFlag, link = checkSubs(sub, link, subs, stack, targetFlag)
-                    if sub.subs then return end
-                    queueEffect(sub)
-                elseif bit.band(sub.flags, targetFlag) == 0 then
-                    markAsDirty(sub, targetFlag)
-                end
-
-            -- 处理跟踪状态的订阅者
-            elseif isValidLink(link, sub) then
-                if bit.rshift(subFlags, 2) == 0 then
-                    markAsDirty(sub, bit.bor(targetFlag, SubscriberFlags.CanPropagate))
-                    stack, targetFlag, link = checkSubs(sub, link, subs, stack, targetFlag)
-                    if sub.subs then return end
-                elseif bit.band(sub.flags, targetFlag) == 0 then
-                    markAsDirty(sub, targetFlag)
-                end
+            
+            -- 处理当前订阅者
+            local shouldReturn
+            stack, targetFlag, link, shouldReturn = processSubscriber(sub, targetFlag, link, subs, stack)
+            if shouldReturn then
+                return
             end
 
-            -- 处理下一个订阅者
             nextSub = subs.nextSub
             if not nextSub then
                 if stack > 0 then
@@ -195,8 +226,11 @@ local function propagate(subs)
                         link = subs
 
                         if subs then
-                            targetFlag = stack > 0 and SubscriberFlags.ToCheckDirty or SubscriberFlags.Dirty
-                            return
+                            targetFlag = SubscriberFlags.Dirty
+                            if stack > 0 then
+                                targetFlag = SubscriberFlags.ToCheckDirty
+                            end
+                            return -- do_func return
                         end
 
                         dep = prevLink.dep
@@ -206,19 +240,22 @@ local function propagate(subs)
                 return
             end
 
-            -- 更新目标标志
             if link ~= subs then
-                targetFlag = stack > 0 and SubscriberFlags.ToCheckDirty or SubscriberFlags.Dirty
+                targetFlag = SubscriberFlags.Dirty
+                if stack > 0 then
+                    targetFlag = SubscriberFlags.ToCheckDirty
+                end
             end
 
             subs = nextSub
             link = subs
         end)
 
-        if bBreak then break end
+        if bBreak then
+            break
+        end
     until false
 
-    -- 处理队列中的效果
     if global.batchDepth <= 0 then
         global.drainQueuedEffects()
     end
