@@ -388,25 +388,19 @@ local function processDependencyStack(stack, deps, sub, dirty)
     return stack, deps, sub, dirty, gototop
 end
 
-local function handleDependencyStackUpdate(stack, deps, sub, dirty)
-    local newStack, newDeps, newSub, newDirty, shouldGotoTop = processDependencyStack(stack, deps, sub, dirty)
-    if shouldGotoTop then
-        return newStack, newDeps, newSub, newDirty, true
-    end
-    return newStack, newDeps, newSub, newDirty, false
-end
-
 local function processStackedDependencies(stack, deps, sub, dirty)
     repeat
-        local newStack, newDeps, newSub, newDirty, shouldBreak = handleDependencyStackUpdate(stack, deps, sub, dirty)
+        local newStack, newDeps, newSub, newDirty, shouldBreak = processDependencyStack(stack, deps, sub, dirty)
         stack = newStack
         deps = newDeps
         sub = newSub
         dirty = newDirty
+
         if shouldBreak then
             return stack, deps, sub, dirty, true
         end
     until stack <= 0
+
     return stack, deps, sub, dirty, false
 end
 
@@ -442,6 +436,7 @@ local function processDependencyCheck(deps, stack)
                     return
                 end
             end
+
             shouldReturn = true
             return
         end
