@@ -60,7 +60,7 @@ function Computed:update()
     system.endTrack(self)
 
     if not success then
-		return
+		return false
     end
 
     if oldValue ~= newValue then

@@ -257,7 +257,7 @@ local function processTrackingSubscriber(sub, targetFlag, link, subs, stack)
     if bit.band(sub.flags, targetFlag) == 0 then
         updateSubscriberFlags(sub, targetFlag, false)
     end
-    
+
     return stack, targetFlag, link, false
 end
 
@@ -325,23 +325,23 @@ end
 
 local function checkDependencyUpdate(dep, deps)
     if not dep.update then
-        return false
+        return false, false
     end
 
     if dep.version ~= deps.version then
-        return true
+        return true, false
     end
 
     local depFlags = dep.flags
     if bit.band(depFlags, SubscriberFlags.Dirty) > 0 then
-        return dep:update()
+        return dep:update(), false
     end
 
     if bit.band(depFlags, SubscriberFlags.ToCheckDirty) > 0 then
-        return nil, true
+        return false, true
     end
 
-    return false
+    return false, false
 end
 
 local function processSubscriberUpdate(sub, prevLink, dirty)
