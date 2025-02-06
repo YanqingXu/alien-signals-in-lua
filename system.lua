@@ -86,27 +86,28 @@ local function findOrCreateLink(dep, sub)
     return linkNewDep(dep, sub, nextDep, currentDep)
 end
 
--- 检查链接是否有效
 local function isValidLink(subLink, sub)
     local depsTail = sub.depsTail
     if not depsTail then
         return false
     end
 
-    for link = sub.deps, depsTail, link.nextDep do
-        if link == subLink then
+    local currentLink = sub.deps
+    while currentLink do
+        if currentLink == subLink then
             return true
         end
 
-        if link == depsTail then
+        if currentLink == depsTail then
             break
         end
+
+        currentLink = currentLink.nextDep
     end
 
     return false
 end
 
--- 更新子订阅者的链接
 local function updateSubsLinks(subSubs, subs)
     if subSubs.nextSub then
         subSubs.prevSub = subs
@@ -115,7 +116,6 @@ local function updateSubsLinks(subSubs, subs)
     return subSubs, subSubs, false
 end
 
--- 确定目标标志
 local function determineTargetFlag(sub, needsStack)
     if needsStack then
         return SubscriberFlags.ToCheckDirty
@@ -128,7 +128,6 @@ local function determineTargetFlag(sub, needsStack)
     return SubscriberFlags.ToCheckDirty
 end
 
--- 检查子订阅者并更新状态
 local function checkSubs(sub, link, subs, stack, targetFlag)
     local subSubs = sub.subs
     if not subSubs then
@@ -145,7 +144,6 @@ local function checkSubs(sub, link, subs, stack, targetFlag)
     return stack, targetFlag, newLink
 end
 
--- 检查订阅者是否可以传播更新
 local function canPropagate(subFlags)
     if bit.rshift(subFlags, 2) == 0 then
         return true
@@ -153,7 +151,6 @@ local function canPropagate(subFlags)
     return bit.band(subFlags, SubscriberFlags.CanPropagate) > 0
 end
 
--- 更新订阅者的标志
 local function updateSubscriberFlags(sub, targetFlag, isCanPropagate)
     if isCanPropagate then
         sub.flags = bit.band(sub.flags, bit.bnot(SubscriberFlags.CanPropagate))
@@ -161,7 +158,6 @@ local function updateSubscriberFlags(sub, targetFlag, isCanPropagate)
     sub.flags = bit.bor(sub.flags, targetFlag)
 end
 
--- 处理副作用队列
 local function handleEffectQueue(sub)
     if not sub.notify then return end
 
@@ -174,13 +170,11 @@ local function handleEffectQueue(sub)
     global.queuedEffectsTail = sub
 end
 
--- 处理子订阅者并检查返回条件
 local function handleSubsAndCheck(sub, stack, targetFlag, link, subs)
     stack, targetFlag, link = checkSubs(sub, link, subs, stack, targetFlag)
     return stack, targetFlag, link, sub.subs ~= nil
 end
 
--- 更新目标标志
 local function updateTargetFlag(stack, link, subs)
     if link ~= subs then
         if stack > 0 then
@@ -191,7 +185,6 @@ local function updateTargetFlag(stack, link, subs)
     return nil
 end
 
--- 更新订阅者状态
 local function updateSubscriberState(nextSub, stack, link, subs)
     local newFlag = updateTargetFlag(stack, link, subs)
     subs = nextSub
@@ -199,7 +192,6 @@ local function updateSubscriberState(nextSub, stack, link, subs)
     return subs, link, newFlag
 end
 
--- 处理依赖栈
 local function processDependencyStack(stack, dep)
     stack = stack - 1
 
@@ -221,7 +213,6 @@ local function processDependencyStack(stack, dep)
 	return stack, link, subs, prevLink.dep, targetFlag
 end
 
--- 处理非跟踪状态的订阅者
 local function processNonTrackingSubscriber(sub, targetFlag, link, subs, stack)
     local isCanPropagate = canPropagate(sub.flags)
     if isCanPropagate then
@@ -243,7 +234,6 @@ local function processNonTrackingSubscriber(sub, targetFlag, link, subs, stack)
     return stack, targetFlag, link, false
 end
 
--- 处理跟踪状态的订阅者
 local function processTrackingSubscriber(sub, targetFlag, link, subs, stack)
     if not isValidLink(link, sub) then
         return stack, targetFlag, link, false
@@ -261,7 +251,6 @@ local function processTrackingSubscriber(sub, targetFlag, link, subs, stack)
     return stack, targetFlag, link, false
 end
 
--- 处理单个订阅者
 local function processSubscriber(sub, targetFlag, link, subs, stack)
     if bit.band(sub.flags, SubscriberFlags.Tracking) == 0 then
         return processNonTrackingSubscriber(sub, targetFlag, link, subs, stack)
@@ -270,7 +259,6 @@ local function processSubscriber(sub, targetFlag, link, subs, stack)
     end
 end
 
--- 处理订阅者迭代
 local function processSubscriberIteration(sub, stack, targetFlag, link, subs)
     local shouldReturn
     stack, targetFlag, link, shouldReturn = processSubscriber(sub, targetFlag, link, subs, stack)
