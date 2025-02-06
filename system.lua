@@ -353,6 +353,129 @@ local function propagate(subs)
     end
 end
 
+-- 检查依赖是否需要更新
+local function checkDependencyUpdate(dep, deps)
+    if not dep.update then
+        return false
+    end
+
+    if dep.version ~= deps.version then
+        return true
+    end
+
+    local depFlags = dep.flags
+    if bit.band(depFlags, SubscriberFlags.Dirty) > 0 then
+        return dep:update()
+    end
+
+    if bit.band(depFlags, SubscriberFlags.ToCheckDirty) > 0 then
+        return nil, true -- 需要检查子依赖
+    end
+
+    return false
+end
+
+-- 处理子订阅者更新
+local function processSubscriberUpdate(sub, prevLink, dirty)
+    if dirty then
+        if sub.update() then
+            return prevLink.sub, true
+        end
+    else
+        sub.flags = bit.band(sub.flags, bit.bnot(SubscriberFlags.ToCheckDirty))
+    end
+    return sub, false
+end
+
+-- 处理依赖栈
+local function processDependencyStack(stack, deps, sub, dirty)
+    local gototop = false
+    global.do_func(function()
+        stack = stack - 1
+        local subSubs = sub.subs
+        local prevLink = subSubs.prevSub
+        subSubs.prevSub = nil
+
+        sub, dirty = processSubscriberUpdate(sub, prevLink, dirty)
+
+        deps = prevLink.nextDep
+        if deps then
+            gototop = true
+            return
+        end
+
+        sub = prevLink.sub
+        dirty = false
+    end)
+    return stack, deps, sub, dirty, gototop
+end
+
+-- 检查依赖是否脏
+local function checkDirty(deps)
+    local stack = 0
+    local dirty = false
+    local nextDep = nil
+
+    repeat
+        local gototop = false
+        local returned = false
+        global.do_func(function()
+            dirty = false
+
+            -- 检查依赖更新
+            local dep = deps.dep
+            local isDirty, needsCheck = checkDependencyUpdate(dep, deps)
+            
+            if needsCheck then
+                -- 需要检查子依赖
+                dep.subs.prevSub = deps
+                deps = dep.deps
+                stack = stack + 1
+                return
+            end
+
+            dirty = isDirty
+            if not dirty then
+                nextDep = deps.nextDep
+            end
+
+            -- 处理栈
+            if dirty or not nextDep then
+                if stack > 0 then
+                    local sub = deps.sub
+                    repeat
+                        local newStack, newDeps, newSub, newDirty, shouldGotoTop = processDependencyStack(stack, deps, sub, dirty)
+                        stack = newStack
+                        deps = newDeps
+                        sub = newSub
+                        dirty = newDirty
+
+                        if shouldGotoTop then
+                            gototop = true
+                            break
+                        end
+                    until stack <= 0
+
+                    if gototop then
+                        return
+                    end
+                end
+
+                returned = true
+                return
+            end
+
+            deps = nextDep
+        end)
+
+        if returned then
+            return dirty
+        end
+    until not deps
+
+    return dirty
+end
+
 local function clearTrack(link)
 	repeat
 		global.do_func(function()
@@ -423,91 +546,6 @@ local function endTrack(sub)
 	end
 
 	sub.flags = bit.band(sub.flags, bit.bnot(SubscriberFlags.Tracking))
-end
-
-local function checkDirty(deps)
-    local stack = 0
-	local dirty = false
-	local nextDep = nil
-
-	repeat
-		local gototop = false
-		local returned = false
-		global.do_func(function()
-			dirty = false
-
-			local dep = deps.dep
-			if dep.update then
-				if dep.version ~= deps.version then
-					dirty = true
-				else
-					local depFlags = dep.flags
-					if bit.band(depFlags, SubscriberFlags.Dirty) > 0 then
-						dirty = dep:update()
-					elseif bit.band(depFlags, SubscriberFlags.ToCheckDirty) > 0 then
-						dep.subs.prevSub = deps
-						deps = dep.deps
-						stack = stack + 1
-						return -- do_func return
-					end
-				end
-			end
-
-			if not dirty then
-				nextDep = deps.nextDep
-			end
-
-			if dirty or not nextDep then
-				if stack > 0 then
-					local sub = deps.sub
-					repeat
-						global.do_func(function()
-							stack = stack - 1
-							local subSubs = sub.subs
-							local prevLink = subSubs.prevSub
-							subSubs.prevSub = nil
-
-							if dirty then
-								if sub.update() then
-									sub = prevLink.sub
-									dirty = true
-									return -- inner do_func return
-								end
-							else
-								sub.flags = bit.band(sub.flags, bit.bnot(SubscriberFlags.ToCheckDirty))
-							end
-
-							deps = prevLink.nextDep
-							if deps then
-								gototop = true
-								return -- inner do_func return
-							end
-
-							sub = prevLink.sub
-							dirty = false
-						end)
-
-						if gototop then
-							break
-						end
-					until stack <= 0
-
-					if gototop then
-						return -- outter do_func return
-					end
-				end
-
-				returned = true
-				return
-			end
-
-			deps = nextDep
-		end)
-
-		if returned then
-			return dirty
-		end
-	until false
 end
 
 return {
