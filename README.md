@@ -1,5 +1,7 @@
 # Alien Signals - Lua Version
 
+[EN README](README.en.md)
+
 这是一个用 Lua 实现的响应式系统，它提供了类似于现代前端框架中的响应式编程能力。
 
 ## 核心概念
