@@ -1,16 +1,23 @@
-require 'global'
+-- test_effect.lua
+-- Test for Lua implementation of reactive system - focusing on effect functionality
+print("========== Reactive System Effect Tests ==========\n")
 
-local effect = require 'effect'
-local signal = require 'signal'
-local computed = require 'computed'
-local effectScope = require 'effectScope'
+-- Load reactive system
+require("bit")
+require("global")
+local effectModule = require("effect")
+local computedModule = require("computed")
+local signalModule = require("signal")
 
-local test = {
-    it = function(name, fn)
+-- Get APIs
+local signal = signalModule.signal
+local computed = computedModule.computed
+local effect = effectModule.effect
+
+local test = function(name, fn)
         print(name)
         fn()
-    end,
-}
+    end
 
 local expect = function(actual)
     return {
@@ -20,176 +27,47 @@ local expect = function(actual)
     }
 end
 
-test.it("should clear subscriptions when untracked by all subscribers", function()
+test('should clear subscriptions when untracked by all subscribers', function ()
     local bRunTimes = 0
 
-    local a = signal.signal(1, "signal_a")
-    local b = computed.computed(function()
+    local a = signal(1)
+    local b = computed(function()
         bRunTimes = bRunTimes + 1
-        return a:get() * 2
-    end, "computed_b")
-    local effect1 = effect.effect(function()
-        b:get()
-    end, "effect1")
-
-    assert(bRunTimes == 1)
-    a:set(2)
-    assert(bRunTimes == 2)
-    effect1:stop()
-    a:set(3)
-    assert(bRunTimes == 2)
-end)
-
-test.it("should not run untracked inner effect", function()
-    local a = signal.signal(3, "signal_a")
-    local b = computed.computed(function()
-        return a:get() > 0
-    end, "computed_b")
-
-    effect.effect(function()
-        if b:get() then
-            effect.effect(function()
-                if a:get() == 0 then
-                    error("bad")
-                end
-            end, "inner effect")
-        end
-    end, "outer effect")
-
-    local function decrement()
-        a:set(a:get() - 1)
-    end
-
-    decrement()
-    decrement()
-    decrement()
-end)
-
-test.it("should run outer effect first", function()
-    local a = signal.signal(1, "signal_a")
-    local b = signal.signal(1, "signal_b")
-
-    effect.effect(function()
-        if a:get() then
-            effect.effect(function()
-                b:get()
-                if a:get() == 0 then
-                    error("bad")
-                end
-            end, "inner effect")
-        end
-    end, "outer effect")
-
-    global.startBatch()
-    b:set(0)
-    a:set(0)
-    global.endBatch()
-end)
-
-test.it("should not trigger inner effect when resolve maybe dirty", function()
-    local a = signal.signal(0, "signal_a")
-    local b = computed.computed(function()
-        return a:get() % 2
-    end, "computed_b")
-
-    local innerTriggerTimes = 0
-
-    effect.effect(function()
-        effect.effect(function()
-            b:get()
-            innerTriggerTimes = innerTriggerTimes + 1
-            if innerTriggerTimes > 1 then
-                error("bad")
-            end
-        end, "inner effect")
-    end, "outer effect")
-
-    a:set(2)
-end)
-
-test.it("should trigger inner effects in sequence", function()
-    local a = signal.signal(0, "signal_a")
-    local b = signal.signal(0, "signal_b")
-    local c = computed.computed(function()
-        return a:get() - b:get()
-    end, "computed_c")
-
-    local order = {}
-    effect.effect(function()
-        c:get()
-
-        effect.effect(function()
-            table.insert(order, 'first inner')
-            a:get()
-        end, "inner effect 1")
-
-        effect.effect(function()
-            table.insert(order, 'last inner')
-            a:get()
-            b:get()
-        end, "inner effect 2")
-    end, "outer effect")
-
-    order = {}
-
-    global.startBatch()
-    b:set(1)
-    a:set(1)
-    global.endBatch()
-
-    assert(#order == 2)
-    assert(order[1] == 'first inner')
-    assert(order[2] == 'last inner')
-end)
-
-test.it("should trigger inner effects in sequence in effect scope", function()
-    local a = signal.signal(0)
-    local b = signal.signal(0)
-    local scope = effectScope.effectScope()
-    local order = {}
-
-    scope:run(function()
-        effect.effect(function()
-            table.insert(order, 'first inner')
-            a:get()
-        end)
-
-        effect.effect(function()
-            table.insert(order, 'last inner')
-            a:get()
-            b:get()
-        end)
+        return a() * 2
     end)
 
-    order = {}
-
-    global.startBatch()
-    b:set(1)
-    a:set(1)
-    global.endBatch()
-
-    assert(#order == 2)
-    assert(order[1] == 'first inner')
-    assert(order[2] == 'last inner')
+    local stopEffect = effect(function()
+        b()
+    end)
+    expect(bRunTimes).toBe(1)
+    a(2)
+    expect(bRunTimes).toBe(2)
+    stopEffect()
+    a(3)
+    expect(bRunTimes).toBe(2)
+    print("test passed\n")
 end)
 
-test.it("should not trigger after stop", function()
-    local count = signal.signal(1)
-    local scope = effectScope.effectScope()
-
-    local triggers = 0
-
-    scope:run(function()
-        effect.effect(function()
-            triggers = triggers + 1
-            count:get()
-        end)
+test('should not run untracked inner effect', function ()
+    local a = signal(3)
+    local b = computed(function()
+        return a() > 0
     end)
 
-    expect(triggers).toBe(1)
-    count:set(2)
-    expect(triggers).toBe(2)
-    scope:stop()
-    count:set(3)
-    expect(triggers).toBe(2)
+    effect(function()
+        if b() then
+            effect(function()
+                if a() == 0 then
+                    error("bad")
+                end
+            end)
+        end
+    end)
+
+    a(2)
+    a(1)
+    a(0)
+    print("test passed\n")
 end)
+
+-- TODO

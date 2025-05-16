@@ -1,96 +1,92 @@
-require 'bit'
-require 'global'
-local system = require 'system'
+-- effect.lua - 处理响应式副作用函数
+require("global")
+local ReactiveFlags = global.ReactiveFlags
 
-local Effect = {}
-Effect.__index = Effect
+-- @param this: Effect | EffectScope
+local function effectOper(this)
+	local dep = this.deps
 
-function Effect.new(fn, ...)
-    local self = setmetatable({}, Effect)
-    self.fn = fn
-    self.nextNotify = nil
+	while(dep) do
+		dep = global.unlink(dep, this)
+	end
 
-    -- Dependency
-    self.subs = nil
-    self.subsTail = nil
+	local sub = this.subs
+	if sub then
+		global.unlink(sub)
+	end
 
-    -- Subscriber
-    self.deps = nil
-    self.depsTail = nil
-    self.flags = system.SubscriberFlags.Dirty;
-
-    self.args = {...}
-
-    if global.activeTrackId > 0 then
-        system.link(self, global.activeSub)
-    elseif global.activeEffectScope then
-        system.link(self, global.activeEffectScope)
-    end
-
-    return self
+	this.flags = ReactiveFlags.None
 end
 
-function Effect:notify()
-    local flags = self.flags
-    if bit.band(flags, system.SubscriberFlags.Dirty) > 0 then
-        self:run()
-        return
-    end
+-- 创建响应式副作用函数
+local function effect(fn)
+    local e = {
+		fn = fn,
+		subs = nil,
+		subsTail = nil,
+		deps = nil,
+		depsTail = nil,
+        flags = ReactiveFlags.Watching,
+    }
 
-    if bit.band(flags, system.SubscriberFlags.ToCheckDirty) > 0 then
-        if system.checkDirty(self.deps) then
-            self:run()
-            return
-        end
+	local vars = global.vars
+	if vars.activeSub then
+		global.link(e, vars.activeSub)
+	elseif vars.activeScope then
+		global.link(e, vars.activeScope)
+	end
 
-        self.flags = bit.band(self.flags, bit.bnot(system.SubscriberFlags.ToCheckDirty))
-    end
+	local prev = global.setCurrentSub(e)
+	local success, err = pcall(fn)
+	global.setCurrentSub(prev)
 
-    if bit.band(flags, system.SubscriberFlags.RunInnerEffects) > 0 then
-        self.flags = bit.band(self.flags, bit.bnot(system.SubscriberFlags.RunInnerEffects))
-        local link = self.deps
+	if not success then
+		error(err)
+	end
 
-        repeat
-            local dep = link.dep
-            if dep.notify then
-                dep:notify()
-            end
-            link = link.nextDep
-        until not link
-    end
+	return utils.bind(effectOper, e)
 end
 
-function Effect:run()
-    local prevSub = global.activeSub
-    local prevTrackId = global.activeTrackId
+-- 创建效果作用域，用于批量清理效果
+-- @return 作用域对象，包含run和cleanup方法
+local function effectScope(fn)
+    -- 创建效果作用域
+    local e = {
+		deps = nil,
+		depsTail = nil,
+		subs = nil,
+		subsTail = nil,
+		flags = ReactiveFlags.None,
+    }
 
-    global.setActiveSub(self, global.nextTrackId())
-    system.startTrack(self)
+    local vars = global.vars
+	if vars.activeSub then
+		global.link(e, vars.activeScope)
+	end
 
-    local success, result = pcall(self.fn)
+	local prevSub = global.setCurrentSub()
+	local prevScope = global.setCurrentScope(e)
 
-    global.setActiveSub(prevSub, prevTrackId)
-    system.endTrack(self)
+	local success, err = pcall(function()
+		fn()
+	end)
 
-    if not success then
-		return
-    end
+	if not success then
+		error(err)
+	end
 
-	return result
+	global.setCurrentScope(prevScope)
+	global.setCurrentSub(prevSub)
+
+	return utils.bind(effectOper, e)
 end
 
-function Effect:stop()
-    system.startTrack(self)
-    system.endTrack(self)
-end
+global.effect = effect
+global.effectScope = effectScope
+global.effectOper = effectOper
 
-local function effect(fn, ...)
-    local e = Effect.new(fn, ...)
-    e:run()
-    return e
-end
-
+-- 返回模块接口
 return {
     effect = effect,
-    Effect = Effect,
+    effectScope = effectScope
 }

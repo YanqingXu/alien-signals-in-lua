@@ -1,82 +1,53 @@
-require 'bit'
-require 'global'
-local system = require 'system'
+-- computed.lua - 处理计算属性的实现
+require("global")
+local ReactiveFlags = global.ReactiveFlags
 
-local Computed = {}
-Computed.__index = Computed
+-- 计算属性操作函数
+-- @param computed 计算属性对象
+-- @return 计算属性的当前值
+local function computedOper(this)
+    local flags = this.flags
+	local isDirty = bit.band(flags, ReactiveFlags.Dirty) > 0
+	local maybeDirty = bit.band(flags, ReactiveFlags.Pending) > 0
 
-function Computed.new(getter, ...)
-    local self = setmetatable({}, Computed)
-    self.getter = getter    --计算函数
-    self.cachedValue = nil  --缓存的计算结果
-    self.version = 0        --版本号
+	if isDirty or (maybeDirty and global.checkDirty(this.deps, this)) then
+		if global.updateComputed(this) then
+			local subs = this.subs
+			if subs then
+				global.shallowPropagate(subs)
+			end
+		end
+	elseif bit.band(flags, ReactiveFlags.Pending) > 0 then
+		this.flags = bit.band(flags, bit.bnot(ReactiveFlags.Pending))
+	end
 
-    -- 作为依赖项的属性
-    self.subs = nil         -- 订阅者链表头
-    self.subsTail = nil     -- 订阅者链表尾
-    self.lastTrackedId = 0  -- 最后一次追踪的ID
+	local vars = global.vars
+	if vars.activeSub then
+		global.link(this, vars.activeSub)
+	elseif vars.activeScope then
+		global.link(this, vars.activeScope)
+	end
 
-    -- 作为订阅者的属性
-    self.deps = nil         -- 依赖项链表头
-    self.depsTail = nil     -- 依赖项链表尾
-    self.flags = system.SubscriberFlags.Dirty -- 状态标志
-    self.args = {...}
-    return self
+	return this.value
 end
 
-function Computed:get()
-    local flags = self.flags
-    if bit.band(flags, system.SubscriberFlags.Dirty) > 0 then
-        self:update()
-    elseif bit.band(flags, system.SubscriberFlags.ToCheckDirty) > 0 then
-        if system.checkDirty(self.deps) then
-            self:update()
-        else
-            self.flags = bit.band(self.flags, bit.bnot(system.SubscriberFlags.ToCheckDirty))
-        end
-    end
+local function computed(getter)
+    local c = {
+        value = nil,
+        subs = nil,
+        subsTail = nil,
+        deps = nil,
+        depsTail = nil,
+        flags = bit.bor(ReactiveFlags.Mutable, ReactiveFlags.Dirty),
+        getter = getter,
+    }
 
-    -- 如果当前有活动的追踪上下文，建立依赖关系
-    if global.activeTrackId > 0 and self.lastTrackedId ~= global.activeTrackId then
-        self.lastTrackedId = global.activeTrackId
-        local link = system.link(self, global.activeSub)
-        link.version = self.version
-    end
-
-    return self.cachedValue
+    return utils.bind(computedOper, c)
 end
 
-function Computed:update()
-    local prevSub = global.activeSub
-    local prevTrackId = global.activeTrackId
+global.computed = computed
 
-    global.setActiveSub(self, global.nextTrackId())
-    system.startTrack(self)
-
-    local oldValue = self.cachedValue
-    local success, newValue = pcall(self.getter, oldValue)
-
-    global.setActiveSub(prevSub, prevTrackId)
-    system.endTrack(self)
-
-    if not success then
-		return false
-    end
-
-    if oldValue ~= newValue then
-        self.cachedValue = newValue
-        self.version = self.version + 1
-        return true
-    end
-
-    return false
-end
-
-local function computed(getter, ...)
-    return Computed.new(getter, ...)
-end
-
+-- 返回模块接口
 return {
     computed = computed,
-    Computed = Computed
 }

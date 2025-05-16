@@ -1,42 +1,56 @@
-require 'global'
-local system = require 'system'
+-- signal.lua - 处理响应式信号的实现
+require("global")
+local ReactiveFlags = global.ReactiveFlags
 
-local Signal = {}
-Signal.__index = Signal
+local function signalOper(this, newValue)
+    if newValue then
+		if newValue ~= this.value then
+			this.value = newValue
+			this.flags = bit.bor(ReactiveFlags.Mutable, ReactiveFlags.Dirty)
 
-function Signal.new(initialValue, ...)
-    local self = setmetatable({}, Signal)
-    self.currentValue = initialValue
-    self.subs = nil
-    self.subsTail = nil
-    self.lastTrackedId = 0
-    self.args = {...}
-    return self
+			local subs = this.subs
+			if subs then
+				global.propagate(subs)
+				if global.vars.batchDepth == 0 then
+					global.flush()
+				end
+			end
+		end
+	else
+		local value = this.value
+		if bit.band(this.flags, ReactiveFlags.Dirty) > 0 then
+			if global.updateSignal(this, value) then
+				local subs = this.subs
+				if subs then
+					global.shallowPropagate(subs)
+				end
+			end
+		end
+
+		if global.vars.activeSub then
+			global.link(this, global.vars.activeSub)
+		end
+
+		return value
+	end
 end
 
-function Signal:get()
-    if global.activeTrackId > 0 and self.lastTrackedId ~= global.activeTrackId then
-        self.lastTrackedId = global.activeTrackId
-        system.link(self, global.activeSub)
-    end
-    return self.currentValue
+-- 创建信号对象
+local function signal(initialValue)
+    local s = {
+        previousValue = initialValue,
+        value = initialValue,
+        subs = nil,
+        subsTail = nil,
+        flags = ReactiveFlags.Mutable,
+    }
+
+	return utils.bind(signalOper, s)
 end
 
-function Signal:set(value)
-    if self.currentValue ~= value then
-        self.currentValue = value
+global.signal = signal
 
-        if self.subs then
-            system.propagate(self.subs)
-        end
-    end
-end
-
-local function signal(initialValue, ...)
-    return Signal.new(initialValue, ...)
-end
-
+-- 返回模块接口
 return {
     signal = signal,
-    Signal = Signal
 }
