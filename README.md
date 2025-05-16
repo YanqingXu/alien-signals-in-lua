@@ -21,8 +21,8 @@
    - 用于处理副作用，如更新 UI、发送网络请求等
    - 支持清理和取消订阅
 
-4. EffectScope（效果作用域）
-   - 用于批量管理和清理多个响应式效果
+4. EffectScope（副作用作用域）
+   - 用于批量管理和清理多个响应式副作用函数
    - 简化复杂系统中的内存管理
 
 ## 使用示例
@@ -52,9 +52,9 @@ count(2)  -- 输出: Count: 2, Doubled: 4
 stopEffect()
 count(3)  -- 不会触发任何输出
 
--- 使用效果作用域
+-- 使用副作用作用域
 local cleanup = effect.effectScope(function()
-    -- 在作用域内创建的所有效果
+    -- 在作用域内创建的所有副作用函数
     effect.effect(function()
         print("Scoped effect:", count())
     end)
@@ -64,8 +64,8 @@ local cleanup = effect.effectScope(function()
     end)
 end)
 
-count(4)  -- 触发作用域内的所有效果
-cleanup()  -- 清理作用域内的所有效果
+count(4)  -- 触发作用域内的所有副作用函数
+cleanup()  -- 清理作用域内的所有副作用函数
 count(5)  -- 不会触发任何输出
 ```
 
@@ -85,7 +85,7 @@ count(5)  -- 不会触发任何输出
 
 3. 批量更新
    - 支持批量更新以提高性能
-   - 使用队列管理待执行的副作用
+   - 使用队列管理待执行的副作用函数
    - 智能合并多次更新，减少不必要的计算
 
 4. 脏值检查
@@ -98,11 +98,11 @@ count(5)  -- 不会触发任何输出
 1. 批处理操作
    ```lua
    global.startBatch()
-   -- 多次修改信号值，不会立即触发副作用
+   -- 多次修改信号值，不会立即触发副作用函数
    count(10)
    count(20)
    count(30)
-   global.endBatch() -- 在这里统一触发一次副作用
+   global.endBatch() -- 在这里统一触发一次副作用函数
    ```
 
 2. 处理循环依赖
@@ -119,7 +119,7 @@ count(5)  -- 不会触发任何输出
 2. 内存管理
    - 系统会自动管理依赖关系
    - 不再使用的响应式值会被自动清理
-   - 使用 effectScope 管理复杂组件的副作用
+   - 使用 effectScope 管理复杂组件的副作用函数
 
 ## 许可证
 

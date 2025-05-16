@@ -22,7 +22,7 @@ This is a reactive system implemented in Lua, providing reactive programming cap
    - Supports cleanup and unsubscription
 
 4. EffectScope
-   - Used to batch manage and clean up multiple reactive effects
+   - Used to batch manage and clean up multiple reactive effect functions
    - Simplifies memory management in complex systems
 
 ## Usage Example
@@ -54,7 +54,7 @@ count(3)  -- Won't trigger any output
 
 -- Using effect scope
 local cleanup = effect.effectScope(function()
-    -- All effects created within this scope
+    -- All effect functions created within this scope
     effect.effect(function()
         print("Scoped effect:", count())
     end)
@@ -64,8 +64,8 @@ local cleanup = effect.effectScope(function()
     end)
 end)
 
-count(4)  -- Triggers all effects in the scope
-cleanup()  -- Cleans up all effects in the scope
+count(4)  -- Triggers all effect functions in the scope
+cleanup()  -- Cleans up all effect functions in the scope
 count(5)  -- Won't trigger any output
 ```
 
@@ -85,7 +85,7 @@ The system uses the following techniques to implement reactivity:
 
 3. Batch Updates
    - Supports batch updates to improve performance
-   - Uses a queue to manage pending effects
+   - Uses a queue to manage pending effect functions
    - Intelligently merges multiple updates to reduce unnecessary computations
 
 4. Dirty Value Checking
@@ -98,11 +98,11 @@ The system uses the following techniques to implement reactivity:
 1. Batch Operations
    ```lua
    global.startBatch()
-   -- Multiple signal value changes, won't trigger effects immediately
+   -- Multiple signal value changes, won't trigger effect functions immediately
    count(10)
    count(20)
    count(30)
-   global.endBatch() -- Triggers effects just once here
+   global.endBatch() -- Triggers effect functions just once here
    ```
 
 2. Handling Circular Dependencies
@@ -119,7 +119,7 @@ The system uses the following techniques to implement reactivity:
 2. Memory Management
    - System automatically manages dependency relationships
    - Reactive values no longer in use are automatically cleaned up
-   - Use effectScope to manage effects in complex components
+   - Use effectScope to manage effect functions in complex components
 
 ## License
 
