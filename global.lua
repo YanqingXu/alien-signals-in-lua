@@ -26,13 +26,6 @@ local EffectFlags = {
 
 global.EffectFlags = EffectFlags
 
-global.createStack = function()
-	return {
-		value = nil,
-		prev = nil
-	}
-end
-
 -- 初始化全局变量
 local vars = {
     activeSub = nil,
@@ -50,8 +43,7 @@ local vars = {
 	notifyIndex = 0,
 }
 
-global.vars = vars			--全局变量的表
-global.constants = {}		--全局常量的表
+global.vars = vars
 
 function global.getCurrentSub()
 	return vars.activeSub
@@ -391,7 +383,7 @@ function global.endTracking(sub)
 end
 
 function global.checkDirty(link, sub)
-    local stack = global.createStack()
+    local stack = nil
     local checkDepth = 0
 
 	local top = true
@@ -470,6 +462,7 @@ function global.checkDirty(link, sub)
 						gototop = true
 						return
 					end
+					dirty = false
 				end)
 
 				if gototop then
