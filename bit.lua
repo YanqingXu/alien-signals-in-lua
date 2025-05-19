@@ -1,16 +1,13 @@
 local bit = {}
 
--- 位操作: 左移
 function bit.lshift(a, n)
     return a * (2 ^ n)
 end
 
--- 位操作: 右移
 function bit.rshift(a, n)
     return math.floor(a / (2 ^ n))
 end
 
--- 位操作: 与
 function bit.band(a, b)
     local result = 0
     local bitval = 1
@@ -25,7 +22,6 @@ function bit.band(a, b)
     return result
 end
 
--- 位操作: 或
 function bit.bor(a, b)
     local result = 0
     local bitval = 1
@@ -40,7 +36,6 @@ function bit.bor(a, b)
     return result
 end
 
--- 位操作: 异或
 function bit.bxor(a, b)
     local result = 0
     local value = 1
@@ -57,9 +52,8 @@ function bit.bxor(a, b)
     return result
 end
 
--- 位操作: 位取反
 function bit.bnot(a)
-	return 4294967295 - a
+    return 4294967295 - a
 end
 
 return bit

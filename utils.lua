@@ -1,33 +1,19 @@
-utils = {}
+local utils = {}
 
 -- 计数
 function utils.count_i(tbl, pred)
-	if not pred then
-		return #tbl
-	end
+    if not pred then
+        return #tbl
+    end
 
     local result = 0
-	for i, v in ipairs(tbl) do
-		if pred(v, i) then
-			result = result + 1
-		end
-	end
+    for i, v in ipairs(tbl) do
+        if pred(v, i) then
+            result = result + 1
+        end
+    end
 
     return result
-end
-
--- 计数
-function utils.count(tbl, pred)
-	local result = 0
-	for k, v in pairs(tbl) do
-		if not pred then
-			result = result + 1
-		elseif pred(v, k) then
-			result = result + 1
-		end
-	end
-
-	return result
 end
 
 function utils.unpack(tbl, i, count)
@@ -40,10 +26,10 @@ function utils.unpack(tbl, i, count)
 end
 
 function utils.do_func(func)
-	func = func or function() end
-	if type(func) == "function" then
-		return func()
-	end
+    func = func or function() end
+    if type(func) == "function" then
+        return func()
+    end
 end
 
 function utils.concat(tbl, ...)
@@ -62,15 +48,15 @@ function utils.concat(tbl, ...)
 end
 
 function utils.bind(func, ...)
-	local args = {...}
-	return function(...)
-		return func(utils.unpack(utils.concat(args, {...})))
-	end
+    local args = {...}
+    return function(...)
+        return func(utils.unpack(utils.concat(args, {...})))
+    end
 end
 
 function utils.test(name, fn)
-	print(name)
-	fn()
+    print(name)
+    fn()
 end
 
 function utils.expect(actual)
