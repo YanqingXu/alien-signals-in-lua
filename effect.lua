@@ -60,7 +60,7 @@ local function effectScope(fn)
     }
 
     local vars = global.vars
-	if vars.activeSub then
+	if vars.activeScope then
 		global.link(e, vars.activeScope)
 	end
 

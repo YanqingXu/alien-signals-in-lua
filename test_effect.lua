@@ -5,6 +5,7 @@ print("========== Reactive System Effect Tests ==========\n")
 -- Load reactive system
 require("bit")
 require("global")
+require("utils")
 local effectModule = require("effect")
 local computedModule = require("computed")
 local signalModule = require("signal")
@@ -15,28 +16,8 @@ local computed = computedModule.computed
 local effect = effectModule.effect
 local effectScope = effectModule.effectScope
 
-local test = function(name, fn)
-        print(name)
-        fn()
-    end
-
-local expect = function(actual)
-    return {
-        toBe = function(expected)
-            assert(actual == expected)
-        end,
-
-        toEqual = function(expected)
-            if type(actual) == "table" and type(expected) == "table" then
-                for k, v in pairs(expected) do
-                    assert(actual[k] == v)
-                end
-            else
-                assert(actual == expected)
-            end
-        end,
-    }
-end
+local test = utils.test
+local expect = utils.expect
 
 test('should clear subscriptions when untracked by all subscribers', function ()
     local bRunTimes = 0
@@ -301,5 +282,5 @@ test('should handle flags are indirectly updated during checkDirty', function()
     print("test passed\n")
 end)
 
-print("Reactive System Effect Tests completed successfully.")
+print("========== All tests passed!!! ==========\n")
 print("====================================================\n")

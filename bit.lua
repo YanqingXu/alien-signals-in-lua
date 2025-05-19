@@ -61,29 +61,3 @@ end
 function bit.bnot(a)
 	return 4294967295 - a
 end
-
--- 连续多个位操作
-function bit.bop(op, ...)
-	local result = 0
-	local args = {...}
-	local func = bit[op]
-	if not func then
-		error("Invalid bit operation: " .. op)
-		return result
-	end
-
-	if #args < 2 then
-		error("At least two arguments are required for bit operation: " .. op)
-		return result
-	end
-
-	for i, v in ipairs(args) do
-		if i == 1 then
-			result = v
-		else
-			result = func(result, v)
-		end
-	end
-
-	return result
-end

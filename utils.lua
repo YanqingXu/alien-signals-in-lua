@@ -67,3 +67,26 @@ function utils.bind(func, ...)
 		return func(utils.unpack(utils.concat(args, {...})))
 	end
 end
+
+function utils.test(name, fn)
+	print(name)
+	fn()
+end
+
+function utils.expect(actual)
+    return {
+        toBe = function(expected)
+            assert(actual == expected)
+        end,
+
+        toEqual = function(expected)
+            if type(actual) == "table" and type(expected) == "table" then
+                for k, v in pairs(expected) do
+                    assert(actual[k] == v)
+                end
+            else
+                assert(actual == expected)
+            end
+        end,
+    }
+end
