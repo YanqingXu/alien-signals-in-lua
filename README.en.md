@@ -1,8 +1,10 @@
-# Alien Signals - Lua Version
+# Alien Signals - Lua Reactive Programming System
 
 [简体中文 README](README.md)
 
-This is a reactive system implemented in Lua, providing reactive programming capabilities similar to modern frontend frameworks. It offers a clean API for reactive data flow management and automatic dependency tracking.
+## Introduction
+
+Alien Signals is an efficient reactive programming system implemented in Lua, inspired by reactive systems in modern frontend frameworks like Vue and React. It provides automatic dependency tracking and reactive data flow management capabilities for Lua applications through a clean and powerful API.
 
 ## Core Concepts
 
@@ -24,25 +26,29 @@ This is a reactive system implemented in Lua, providing reactive programming cap
 4. EffectScope
    - Used to batch manage and clean up multiple reactive effect functions
    - Simplifies memory management in complex systems
+   - Supports nested scope structures
 
 ## Usage Example
 
 ```lua
-local signal = require 'signal'
-local computed = require 'computed'
-local effect = require 'effect'
+local reactive = require("reactive")
+local signal = reactive.signal
+local computed = reactive.computed
+local effect = reactive.effect
+local effectScope = reactive.effectScope
 
 -- Create reactive values
-local count = signal.signal(0)
-local doubled = computed.computed(function()
+local count = signal(0)
+local doubled = computed(function()
     return count() * 2
 end)
 
 -- Create an effect
-local stopEffect = effect.effect(function()
+local stopEffect = effect(function()
     print("Count:", count())
     print("Doubled:", doubled())
 end)
+-- Output: Count: 0, Doubled: 0
 
 -- Modify values, which will automatically trigger related computations and effects
 count(1)  -- Output: Count: 1, Doubled: 2
@@ -53,13 +59,13 @@ stopEffect()
 count(3)  -- Won't trigger any output
 
 -- Using effect scope
-local cleanup = effect.effectScope(function()
+local cleanup = effectScope(function()
     -- All effect functions created within this scope
-    effect.effect(function()
+    effect(function()
         print("Scoped effect:", count())
     end)
     
-    effect.effect(function()
+    effect(function()
         print("Another effect:", doubled())
     end)
 end)
@@ -69,12 +75,44 @@ cleanup()  -- Cleans up all effect functions in the scope
 count(5)  -- Won't trigger any output
 ```
 
+## Advanced Features
+
+### Batch Updates
+
+When performing multiple state updates, you can use batch update mode to avoid triggering effects multiple times, improving performance.
+
+```lua
+local reactive = require("reactive")
+local signal = reactive.signal
+local effect = reactive.effect
+local startBatch = reactive.startBatch
+local endBatch = reactive.endBatch
+
+local count = signal(0)
+local multiplier = signal(1)
+
+effect(function()
+    print("Result:", count() * multiplier())
+end)
+-- Output: Result: 0
+
+-- Without batch updates: the effect executes twice
+count(5) -- Output: Result: 5
+multiplier(2) -- Output: Result: 10
+
+-- With batch updates: the effect executes only once
+startBatch()
+count(10)
+multiplier(3)
+endBatch() -- Output: Result: 30
+```
+
 ## Implementation Details
 
 The system uses the following techniques to implement reactivity:
 
 1. Dependency Tracking
-   - Uses function closures and binding mechanism for object system
+   - Uses function closures and binding mechanism for the object system
    - Tracks the currently executing computation or effect through global state
    - Automatically collects and manages dependencies, building a reactive data dependency graph
 
@@ -83,44 +121,49 @@ The system uses the following techniques to implement reactivity:
    - O(1) time complexity for dependency addition and removal operations
    - Automatically cleans up dependencies that are no longer needed, preventing memory leaks
 
-3. Batch Updates
-   - Supports batch updates to improve performance
-   - Uses a queue to manage pending effect functions
-   - Intelligently merges multiple updates to reduce unnecessary computations
-
-4. Dirty Value Checking
+3. Dirty Value Checking and Optimization
    - Employs efficient bit operations for dirty value checking
-   - Recalculates derived values only when necessary
+   - Intelligently determines when to recalculate derived values
    - Precise dependency graph traversal algorithm
 
-## Advanced Features
-
-1. Batch Operations
-   ```lua
-   global.startBatch()
-   -- Multiple signal value changes, won't trigger effect functions immediately
-   count(10)
-   count(20)
-   count(30)
-   global.endBatch() -- Triggers effect functions just once here
-   ```
-
-2. Handling Circular Dependencies
-   - System can intelligently handle circular dependencies between reactive values
-   - Uses flags to prevent infinite recursion and stack overflow
+4. Update Scheduling System
+   - Uses a queue to manage pending effect functions
+   - Intelligently merges multiple updates to reduce unnecessary computations
+   - Supports batch updates to improve performance
 
 ## Considerations
 
-1. Performance
+1. Performance Optimization
    - Avoid accessing too many reactive values in a single computed property
    - Use batch updates judiciously to improve performance
    - Don't modify other reactive values inside computed properties
 
-2. Memory Management
+2. Circular Dependencies
+   - Although the system can intelligently handle some circular dependencies
+   - It's still recommended to avoid complex circular dependencies
+   - Uses bit flags to prevent infinite recursion and stack overflow
+
+3. Memory Management
    - System automatically manages dependency relationships
-   - Reactive values no longer in use are automatically cleaned up
-   - Use effectScope to manage effect functions in complex components
+   - Effects no longer in use are automatically cleaned up
+   - Use effectScope to manage multiple effects in complex components
+
+## Complete API Reference
+
+```lua
+local reactive = require("reactive")
+
+-- Core APIs
+local signal = reactive.signal       -- Create a reactive signal
+local computed = reactive.computed   -- Create a computed property
+local effect = reactive.effect       -- Create an effect
+local effectScope = reactive.effectScope  -- Create an effect scope
+
+-- Batch processing APIs
+local startBatch = reactive.startBatch  -- Start batch updates
+local endBatch = reactive.endBatch      -- End batch updates and execute updates
+```
 
 ## License
 
-MIT License
+This project is licensed under the [LICENSE](LICENSE).

@@ -1,8 +1,10 @@
-# Alien Signals - Lua Version
+# Alien Signals - Lua响应式编程系统
 
-[EN README](README.en.md)
+[English README](README.en.md)
 
-这是一个用 Lua 实现的响应式系统，它提供了类似于现代前端框架中的响应式编程能力。通过简洁的 API，它支持响应式数据流管理和自动依赖追踪。
+## 项目简介
+
+Alien Signals是一个用Lua语言实现的高效响应式编程系统，受到现代前端框架（如Vue、React）响应式系统的启发。它通过简洁而强大的API，为Lua应用提供自动依赖追踪和响应式数据流管理能力。
 
 ## 核心概念
 
@@ -18,55 +20,91 @@
 
 3. Effect（副作用）
    - 响应式值变化时自动执行的函数
-   - 用于处理副作用，如更新 UI、发送网络请求等
+   - 用于处理副作用，如更新UI、发送网络请求等
    - 支持清理和取消订阅
 
 4. EffectScope（副作用作用域）
    - 用于批量管理和清理多个响应式副作用函数
    - 简化复杂系统中的内存管理
+   - 支持嵌套作用域结构
 
 ## 使用示例
 
 ```lua
-local signal = require 'signal'
-local computed = require 'computed'
-local effect = require 'effect'
+local reactive = require("reactive")
+local signal = reactive.signal
+local computed = reactive.computed
+local effect = reactive.effect
+local effectScope = reactive.effectScope
 
 -- 创建响应式值
-local count = signal.signal(0)
-local doubled = computed.computed(function()
+local count = signal(0)
+local doubled = computed(function()
     return count() * 2
 end)
 
 -- 创建副作用
-local stopEffect = effect.effect(function()
-    print("Count:", count())
-    print("Doubled:", doubled())
+local stopEffect = effect(function()
+    print("计数:", count())
+    print("双倍:", doubled())
 end)
+-- 输出: 计数: 0, 双倍: 0
 
 -- 修改值，会自动触发相关的计算和副作用
-count(1)  -- 输出: Count: 1, Doubled: 2
-count(2)  -- 输出: Count: 2, Doubled: 4
+count(1)  -- 输出: 计数: 1, 双倍: 2
+count(2)  -- 输出: 计数: 2, 双倍: 4
 
 -- 停止副作用监听
 stopEffect()
 count(3)  -- 不会触发任何输出
 
 -- 使用副作用作用域
-local cleanup = effect.effectScope(function()
+local cleanup = effectScope(function()
     -- 在作用域内创建的所有副作用函数
-    effect.effect(function()
-        print("Scoped effect:", count())
+    effect(function()
+        print("作用域内副作用:", count())
     end)
     
-    effect.effect(function()
-        print("Another effect:", doubled())
+    effect(function()
+        print("另一个副作用:", doubled())
     end)
 end)
 
 count(4)  -- 触发作用域内的所有副作用函数
 cleanup()  -- 清理作用域内的所有副作用函数
 count(5)  -- 不会触发任何输出
+```
+
+## 高级功能
+
+### 批量更新
+
+在进行多个状态更新时，可以使用批量更新模式避免多次触发副作用，提高性能。
+
+```lua
+local reactive = require("reactive")
+local signal = reactive.signal
+local effect = reactive.effect
+local startBatch = reactive.startBatch
+local endBatch = reactive.endBatch
+
+local count = signal(0)
+local multiplier = signal(1)
+
+effect(function()
+    print("结果:", count() * multiplier())
+end)
+-- 输出：结果: 0
+
+-- 不使用批量更新：副作用会执行两次
+count(5) -- 输出：结果: 5
+multiplier(2) -- 输出：结果: 10
+
+-- 使用批量更新：副作用只执行一次
+startBatch()
+count(10)
+multiplier(3)
+endBatch() -- 输出：结果: 30
 ```
 
 ## 实现细节
@@ -83,44 +121,49 @@ count(5)  -- 不会触发任何输出
    - O(1)时间复杂度的依赖添加和删除操作
    - 自动清理不再需要的依赖，避免内存泄漏
 
-3. 批量更新
-   - 支持批量更新以提高性能
-   - 使用队列管理待执行的副作用函数
-   - 智能合并多次更新，减少不必要的计算
-
-4. 脏值检查
+3. 脏值检查与优化
    - 采用位运算的高效脏值检查机制
-   - 只在必要时重新计算派生值
+   - 智能判断何时需要重新计算派生值
    - 精确的依赖图遍历算法
 
-## 高级功能
-
-1. 批处理操作
-   ```lua
-   global.startBatch()
-   -- 多次修改信号值，不会立即触发副作用函数
-   count(10)
-   count(20)
-   count(30)
-   global.endBatch() -- 在这里统一触发一次副作用函数
-   ```
-
-2. 处理循环依赖
-   - 系统能够智能处理响应式值之间的循环依赖
-   - 使用标记位避免无限递归和栈溢出
+4. 更新调度系统
+   - 使用队列管理待执行的副作用函数
+   - 智能合并多次更新，减少不必要的计算
+   - 支持批量更新以提高性能
 
 ## 注意事项
 
-1. 性能考虑
+1. 性能优化
    - 尽量避免在一个计算属性中访问太多的响应式值
    - 合理使用批量更新来提高性能
    - 不要在计算属性内部修改其他响应式值
 
-2. 内存管理
+2. 循环依赖
+   - 虽然系统能够智能处理一定程度的循环依赖
+   - 但仍建议避免复杂的循环依赖关系
+   - 使用位运算标记位避免无限递归和栈溢出
+
+3. 内存管理
    - 系统会自动管理依赖关系
-   - 不再使用的响应式值会被自动清理
-   - 使用 effectScope 管理复杂组件的副作用函数
+   - 不再使用的副作用会被自动清理
+   - 使用 effectScope 管理复杂组件的多个副作用函数
+
+## 完整API参考
+
+```lua
+local reactive = require("reactive")
+
+-- 核心API
+local signal = reactive.signal       -- 创建响应式信号
+local computed = reactive.computed   -- 创建计算属性  
+local effect = reactive.effect       -- 创建副作用
+local effectScope = reactive.effectScope  -- 创建副作用作用域
+
+-- 批量处理API
+local startBatch = reactive.startBatch  -- 开始批量更新
+local endBatch = reactive.endBatch      -- 结束批量更新并执行更新
+```
 
 ## 许可证
 
-MIT License
+本项目使用[LICENSE](LICENSE)许可证。

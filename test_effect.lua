@@ -84,199 +84,199 @@ test('should run outer effect first', function ()
 end)
 
 test('should not trigger inner effect when resolve maybe dirty', function ()
-	local a = signal(0)
-	local b = computed(function() return a() % 2 end)
+    local a = signal(0)
+    local b = computed(function() return a() % 2 end)
 
-	local innerTriggerTimes = 0
+    local innerTriggerTimes = 0
 
-	effect(function()
-		effect(function()
-			b()
-			innerTriggerTimes = innerTriggerTimes + 1
-			if innerTriggerTimes >= 2 then
-				error("bad")
-			end
-		end)
-	end)
+    effect(function()
+        effect(function()
+            b()
+            innerTriggerTimes = innerTriggerTimes + 1
+            if innerTriggerTimes >= 2 then
+                error("bad")
+            end
+        end)
+    end)
 
-	a(2)
+    a(2)
     print("test passed\n")
 end)
 
 test('should trigger inner effects in sequence', function()
-	local a = signal(0)
-	local b = signal(0)
-	local c = computed(function() return a() - b() end)
-	local order = {}
+    local a = signal(0)
+    local b = signal(0)
+    local c = computed(function() return a() - b() end)
+    local order = {}
 
-	effect(function()
-		c()
+    effect(function()
+        c()
 
-		effect(function()
-			table.insert(order, 'first inner')
-			a()
-		end)
+        effect(function()
+            table.insert(order, 'first inner')
+            a()
+        end)
 
-		effect(function()
-			table.insert(order, 'last inner')
-			a()
-			b()
-		end)
+        effect(function()
+            table.insert(order, 'last inner')
+            a()
+            b()
+        end)
     end)
 
-	order = {}
+    order = {}
 
-	startBatch()
-	b(1)
-	a(1)
-	endBatch()
+    startBatch()
+    b(1)
+    a(1)
+    endBatch()
 
-	expect(order).toEqual({'first inner', 'last inner'})
+    expect(order).toEqual({'first inner', 'last inner'})
     print("test passed\n")
 end)
 
 test('should trigger inner effects in sequence in effect scope', function()
-	local a = signal(0)
-	local b = signal(0)
-	local order = {}
+    local a = signal(0)
+    local b = signal(0)
+    local order = {}
 
-	effectScope(function()
+    effectScope(function()
 
-		effect(function()
-			table.insert(order, 'first inner')
-			a()
-		end)
+        effect(function()
+            table.insert(order, 'first inner')
+            a()
+        end)
 
-		effect(function()
-			table.insert(order, 'last inner')
-			a()
-			b()
-		end)
-	end)
+        effect(function()
+            table.insert(order, 'last inner')
+            a()
+            b()
+        end)
+    end)
 
-	order = {}
+    order = {}
 
-	startBatch()
-	b(1)
-	a(1)
-	endBatch()
+    startBatch()
+    b(1)
+    a(1)
+    endBatch()
 
-	expect(order).toEqual({'first inner', 'last inner'})
+    expect(order).toEqual({'first inner', 'last inner'})
     print("test passed\n")
 end)
 
 test('should custom effect support batch', function()
-	function batchEffect(fn)
-		return effect(function()
-			startBatch()
-			local result = fn()
+    function batchEffect(fn)
+        return effect(function()
+            startBatch()
+            local result = fn()
             endBatch()
             return result
-		end)
-	end
+        end)
+    end
 
-	local logs = {}
-	local a = signal(0)
-	local b = signal(0)
+    local logs = {}
+    local a = signal(0)
+    local b = signal(0)
 
-	local aa = computed(function()
-		table.insert(logs, 'aa-0')
-		if a() == 0 then
-			b(1)
-		end
-		table.insert(logs, 'aa-1')
-	end)
+    local aa = computed(function()
+        table.insert(logs, 'aa-0')
+        if a() == 0 then
+            b(1)
+        end
+        table.insert(logs, 'aa-1')
+    end)
 
-	local bb = computed(function()
-		table.insert(logs, 'bb')
-		return b()
-	end)
+    local bb = computed(function()
+        table.insert(logs, 'bb')
+        return b()
+    end)
 
-	batchEffect(function()
-		bb()
-	end)
-	batchEffect(function()
-		aa()
-	end)
+    batchEffect(function()
+        bb()
+    end)
+    batchEffect(function()
+        aa()
+    end)
 
-	expect(logs).toEqual({'bb', 'aa-0', 'aa-1', 'bb'})
+    expect(logs).toEqual({'bb', 'aa-0', 'aa-1', 'bb'})
     print("test passed\n")
 end)
 
 test('should duplicate subscribers do not affect the notify order', function()
-	local src1 = signal(0)
-	local src2 = signal(0)
-	local order = {}
+    local src1 = signal(0)
+    local src2 = signal(0)
+    local order = {}
 
-	effect(function()
-		table.insert(order, 'a')
-		local currentSub = setCurrentSub(nil)
-		local isOne = src2() == 1
-		setCurrentSub(currentSub)
-		if isOne then
-			src1()
-		end
-		src2()
-		src1()
-	end)
-	effect(function()
-		table.insert(order, 'b')
-		src1()
-	end)
-	src2(1) -- src1.subs: a -> b -> a
+    effect(function()
+        table.insert(order, 'a')
+        local currentSub = setCurrentSub(nil)
+        local isOne = src2() == 1
+        setCurrentSub(currentSub)
+        if isOne then
+            src1()
+        end
+        src2()
+        src1()
+    end)
+    effect(function()
+        table.insert(order, 'b')
+        src1()
+    end)
+    src2(1) -- src1.subs: a -> b -> a
 
-	order = {}
-	src1(src1() + 1)
+    order = {}
+    src1(src1() + 1)
 
-	expect(order).toEqual({'a', 'b'})
+    expect(order).toEqual({'a', 'b'})
     print("test passed\n")
 end)
 
 test('should handle side effect with inner effects', function()
-	local a = signal(0)
-	local b = signal(0)
-	local order = {}
+    local a = signal(0)
+    local b = signal(0)
+    local order = {}
 
-	effect(function()
-		effect(function()
-			a()
-			table.insert(order, 'a')
-		end)
-		effect(function()
-			b()
-			table.insert(order, 'b')
-		end)
-		expect(order).toEqual({'a', 'b'})
+    effect(function()
+        effect(function()
+            a()
+            table.insert(order, 'a')
+        end)
+        effect(function()
+            b()
+            table.insert(order, 'b')
+        end)
+        expect(order).toEqual({'a', 'b'})
 
-		order = {}
-		b(1)
-		a(1)
-		expect(order).toEqual({'b', 'a'})
-	end)
+        order = {}
+        b(1)
+        a(1)
+        expect(order).toEqual({'b', 'a'})
+    end)
     print("test passed\n")
 end)
 
 test('should handle flags are indirectly updated during checkDirty', function()
-	local a = signal(false)
-	local b = computed(function() return a() end)
-	local c = computed(function()
-		b()
-		return 0
-	end)
-	local d = computed(function()
-		c()
-		return b()
-	end)
+    local a = signal(false)
+    local b = computed(function() return a() end)
+    local c = computed(function()
+        b()
+        return 0
+    end)
+    local d = computed(function()
+        c()
+        return b()
+    end)
 
-	local triggers = 0
+    local triggers = 0
 
-	effect(function()
-		d()
-		triggers = triggers + 1
-	end)
-	expect(triggers).toBe(1)
-	a(true)
-	expect(triggers).toBe(2)
+    effect(function()
+        d()
+        triggers = triggers + 1
+    end)
+    expect(triggers).toBe(1)
+    a(true)
+    expect(triggers).toBe(2)
     print("test passed\n")
 end)
 
