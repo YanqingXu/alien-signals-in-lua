@@ -3,24 +3,20 @@
 print("========== Reactive System Effect Scope Tests ==========\n")
 
 -- Load reactive system
-require("bit")
-require("global")
-require("utils")
-local effectModule = require("effect")
-local signalModule = require("signal")
+local reactive = require("reactive")
+local signal = reactive.signal
+local effect = reactive.effect
+local effectScope = reactive.effectScope
 
--- Get APIs
-local signal = signalModule.signal
-local effect = effectModule.effect
-local effectScope = effectModule.effectScope
 
+local utils = require("utils")
 local test = utils.test
 local expect = utils.expect
 
 test('should not trigger after stop', function ()
-	local count = signal(1);
+	local count = signal(1)
 
-	local triggers = 0;
+	local triggers = 0
 	local effect1
 
 	local stopScope = effectScope(function()

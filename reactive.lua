@@ -1,5 +1,5 @@
-require("bit")
-require("utils")
+local bit = require("bit")
+local utils = require("utils")
 
 local reactive = {}
 
@@ -555,7 +555,6 @@ local function signalOper(this, newValue)
     end
 end
 
--- 创建信号对象
 local function signal(initialValue)
     local s = {
         previousValue = initialValue,
@@ -626,6 +625,7 @@ local function effectOper(this)
 
     this.flags = ReactiveFlags.None
 end
+reactive.effectOper = effectOper
 
 local function effect(fn)
     local e = {

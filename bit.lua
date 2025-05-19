@@ -1,4 +1,4 @@
-bit = {}
+local bit = {}
 
 -- 位操作: 左移
 function bit.lshift(a, n)
@@ -61,3 +61,5 @@ end
 function bit.bnot(a)
 	return 4294967295 - a
 end
+
+return bit

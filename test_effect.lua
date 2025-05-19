@@ -3,21 +3,19 @@
 print("========== Reactive System Effect Tests ==========\n")
 
 -- Load reactive system
-require("bit")
-require("global")
-require("utils")
-local effectModule = require("effect")
-local computedModule = require("computed")
-local signalModule = require("signal")
+local reactive = require("reactive")
+local signal = reactive.signal
+local computed = reactive.computed
+local effect = reactive.effect
+local effectScope = reactive.effectScope
+local startBatch = reactive.startBatch
+local endBatch = reactive.endBatch
+local setCurrentSub = reactive.setCurrentSub
 
--- Get APIs
-local signal = signalModule.signal
-local computed = computedModule.computed
-local effect = effectModule.effect
-local effectScope = effectModule.effectScope
-
+local utils = require("utils")
 local test = utils.test
 local expect = utils.expect
+
 
 test('should clear subscriptions when untracked by all subscribers', function ()
     local bRunTimes = 0
@@ -78,10 +76,10 @@ test('should run outer effect first', function ()
         end
     end)
 
-    global.startBatch()
+    startBatch()
     b(0)
     a(0)
-    global.endBatch()
+    endBatch()
     print("test passed\n")
 end)
 
@@ -128,10 +126,10 @@ test('should trigger inner effects in sequence', function()
 
 	order = {}
 
-	global.startBatch()
+	startBatch()
 	b(1)
 	a(1)
-	global.endBatch()
+	endBatch()
 
 	expect(order).toEqual({'first inner', 'last inner'})
     print("test passed\n")
@@ -158,10 +156,10 @@ test('should trigger inner effects in sequence in effect scope', function()
 
 	order = {}
 
-	global.startBatch()
+	startBatch()
 	b(1)
 	a(1)
-	global.endBatch()
+	endBatch()
 
 	expect(order).toEqual({'first inner', 'last inner'})
     print("test passed\n")
@@ -170,9 +168,9 @@ end)
 test('should custom effect support batch', function()
 	function batchEffect(fn)
 		return effect(function()
-			global.startBatch()
+			startBatch()
 			local result = fn()
-            global.endBatch()
+            endBatch()
             return result
 		end)
 	end
@@ -212,9 +210,9 @@ test('should duplicate subscribers do not affect the notify order', function()
 
 	effect(function()
 		table.insert(order, 'a')
-		local currentSub = global.setCurrentSub(nil)
+		local currentSub = setCurrentSub(nil)
 		local isOne = src2() == 1
-		global.setCurrentSub(currentSub)
+		setCurrentSub(currentSub)
 		if isOne then
 			src1()
 		end

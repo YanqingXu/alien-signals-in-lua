@@ -3,18 +3,13 @@
 print("========== Reactive System Computed Tests ==========\n")
 
 -- Load reactive system
-require("bit")
-require("global")
-require("utils")
-local computedModule = require("computed")
-local signalModule = require("signal")
-
--- Get APIs
-local signal = signalModule.signal
-local computed = computedModule.computed
-
+local utils = require("utils")
 local test = utils.test
 local expect = utils.expect
+
+local reactive = require("reactive")
+local signal = reactive.signal
+local computed = reactive.computed
 
 test('should correctly propagate changes through computed signals', function ()
     local src = signal(0)
