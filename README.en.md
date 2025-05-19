@@ -4,7 +4,9 @@
 
 ## Introduction
 
-Alien Signals is an efficient reactive programming system implemented in Lua, inspired by reactive systems in modern frontend frameworks like Vue and React. It provides automatic dependency tracking and reactive data flow management capabilities for Lua applications through a clean and powerful API.
+This project is derived from [https://github.com/stackblitz/alien-signals](https://github.com/stackblitz/alien-signals), and is a Lua implementation of the original TypeScript reactive system.
+
+Alien Signals is an efficient reactive programming system. It provides automatic dependency tracking and reactive data flow management capabilities for applications through a clean and powerful API.
 
 ## Core Concepts
 

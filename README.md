@@ -4,7 +4,9 @@
 
 ## 项目简介
 
-Alien Signals是一个用Lua语言实现的高效响应式编程系统，受到现代前端框架（如Vue、React）响应式系统的启发。它通过简洁而强大的API，为Lua应用提供自动依赖追踪和响应式数据流管理能力。
+本项目派生自[https://github.com/stackblitz/alien-signals](https://github.com/stackblitz/alien-signals)，是原TypeScript版本响应式系统的Lua实现。
+
+Alien Signals是一个高效的响应式编程系统，它通过简洁而强大的API，为应用提供自动依赖追踪和响应式数据流管理能力。
 
 ## 核心概念
 
