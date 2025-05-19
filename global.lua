@@ -1,13 +1,8 @@
--- global.lua - 集中管理响应式系统的全局变量和状态
-
--- 导入bit库
 require("bit")
 require("utils")
 
--- 创建全局模块表
 global = {}
 
--- 响应式系统标志位
 local ReactiveFlags = {
 	None = 0,
     Mutable = 1,
@@ -35,28 +30,16 @@ local vars = {
 	queuedEffects = {},
 	queuedEffectsLength = 0,
 
-    isTracking = false,
-    currentNode = nil,
     batchDepth = 0,
-    pendingEffects = {},
-    pendingEffectsLength = 0,
 	notifyIndex = 0,
 }
 
 global.vars = vars
 
-function global.getCurrentSub()
-	return vars.activeSub
-end
-
 function global.setCurrentSub(sub)
 	local prevSub = vars.activeSub
 	vars.activeSub = sub
 	return prevSub
-end
-
-function global.getCurrentScope()
-	return vars.activeScope
 end
 
 function global.setCurrentScope(scope)
@@ -138,59 +121,15 @@ function global.run(e, flags)
 	end
 end
 
---[[===================================================================================
-响应式节点 (ReactiveNode)
-
-所有响应式对象（信号、计算属性、效果）的基础结构。每个响应式节点维护两种关系：
-1. 依赖关系(deps)：当前节点依赖的其他节点链表
-2. 订阅关系(subs)：依赖当前节点的其他节点链表
-
-字段说明：
-- deps: 指向第一个依赖链接的指针，链表头
-- depsTail: 指向最后一个依赖链接的指针，用于快速添加新依赖
-- subs: 指向第一个订阅者链接的指针，链表头
-- subsTail: 指向最后一个订阅者链接的指针，用于快速添加新订阅者
-- flags: 节点的状态标志，使用位运算高效管理状态
-
-此结构遵循TypeScript版本的设计，使用双向链表跟踪依赖关系
-===================================================================================--]]
-global.ReactiveNode = {
-	create = function()
-		return {
-			deps = nil,     -- 第一个依赖链接
-			depsTail = nil, -- 最后一个依赖链接
-			subs = nil,     -- 第一个订阅者链接
-			subsTail = nil, -- 最后一个订阅者链接
-			flags = ReactiveFlags.Mutable -- 节点状态标志
-		}
-	end
-}
-
---[[===================================================================================
-链接对象 (Link)
-
-维护响应式节点之间的依赖关系，使用双向链表结构连接依赖节点和订阅节点。
-每个Link实例代表一个dep->sub的依赖关系。
-
-字段说明：
-- dep: 依赖节点（被依赖的节点）
-- sub: 订阅节点（依赖其他节点的节点）
-- prevSub: 在订阅者链表中的前一个链接，用于反向遍历
-- nextSub: 在订阅者链表中的下一个链接，用于正向遍历
-- prevDep: 在依赖链表中的前一个链接，用于反向遍历
-- nextDep: 在依赖链表中的下一个链接，用于正向遍历
-
-使用双向链表可以实现O(1)时间复杂度的节点删除操作，优于单链表实现
-===================================================================================--]]
 global.Link = {
 	create = function(dep, sub, prevSub, nextSub, prevDep, nextDep)
 		return {
-			dep = dep,      -- 依赖节点
-			sub = sub,      -- 订阅节点
-			prevSub = prevSub,  -- 订阅链表中的前一个链接
-			nextSub = nextSub,  -- 订阅链表中的下一个链接
-			prevDep = prevDep,  -- 依赖链表中的前一个链接
-			nextDep = nextDep   -- 依赖链表中的下一个链接
+			dep = dep,
+			sub = sub,
+			prevSub = prevSub,
+			nextSub = nextSub,
+			prevDep = prevDep,
+			nextDep = nextDep
 		}
 	end
 }
@@ -222,7 +161,6 @@ function global.link(dep, sub)
         return
     end
 
-    -- 创建新的连接对象
     local newLink = global.Link.create(dep, sub, prevDep, nextDep, prevSub)
     dep.subsTail = newLink
 	sub.depsTail = newLink
