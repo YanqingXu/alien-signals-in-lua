@@ -166,7 +166,7 @@ test('should trigger inner effects in sequence in effect scope', function()
 end)
 
 test('should custom effect support batch', function()
-    function batchEffect(fn)
+    local function batchEffect(fn)
         return effect(function()
             startBatch()
             local result = fn()
