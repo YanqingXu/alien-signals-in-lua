@@ -4,7 +4,7 @@
 
 ## Introduction
 
-This project is derived from [https://github.com/stackblitz/alien-signals](https://github.com/stackblitz/alien-signals), and is a Lua implementation of the original TypeScript reactive system.
+This project is ported from [stackblitz/alien-signals](https://github.com/stackblitz/alien-signals), and is a Lua implementation of the original TypeScript reactive system.
 
 Alien Signals is an efficient reactive programming system. It provides automatic dependency tracking and reactive data flow management capabilities for applications through a clean and powerful API.
 
@@ -133,6 +133,142 @@ The system uses the following techniques to implement reactivity:
    - Intelligently merges multiple updates to reduce unnecessary computations
    - Supports batch updates to improve performance
 
+## Linked List Structure In Detail
+
+The core of Alien Signals is a dependency tracking system implemented using doubly-linked list structures. Each link node exists simultaneously in two different linked lists, enabling efficient dependency collection and notification propagation.
+
+### Link Node Structure
+
+Each link node contains the following fields:
+
+```lua
+{
+    dep = dep,        -- Dependency object (Signal or Computed)
+    sub = sub,        -- Subscriber object (Effect or Computed)
+    prevSub = prevSub, -- Previous node in the subscriber chain
+    nextSub = nextSub, -- Next node in the subscriber chain
+    prevDep = prevDep, -- Previous node in the dependency chain
+    nextDep = nextDep  -- Next node in the dependency chain
+}
+```
+
+### Doubly Linked List Diagram
+
+The linked list structure in the system can be represented as follows:
+
+```
+Dependency Relationship Structure:
+
++-------------+          +--------------+          +--------------+
+|    Signal   |          |   Computed   |          |    Effect    |
+| (Data Source)|         | (Derived Value)|        | (Side Effect) |
++-------------+          +--------------+          +--------------+
+       ^                        ^                         ^
+       |                        |                         |
+       |                        |                         |
+       v                        v                         v
++-----------------+    +-----------------+    +-----------------+
+|Subscriber Chain |    |Subscriber Chain |    |Subscriber Chain |
+|   (Vertical)    |    |   (Vertical)    |    |   (Vertical)    |
++-----------------+    +-----------------+    +-----------------+
+       ^                        ^                         ^
+       |                        |                         |
+       |                        |                         |
++======================================================================================================================+
+|                                            Link Node                                                                 |
++======================================================================================================================+
+       |                        |                         |
+       |                        |                         |
+       v                        v                         v
++-----------------+    +-----------------+    +-----------------+
+| Dependency Chain|    | Dependency Chain|    | Dependency Chain|
+|  (Horizontal)   |    |  (Horizontal)   |    |  (Horizontal)   |
++-----------------+    +-----------------+    +-----------------+
+```
+
+### Link Process
+
+When a reactive object (like Signal or Computed) is accessed, the system establishes a dependency relationship between it and the currently active effect:
+
+1. Checks for duplicate dependencies to avoid adding the same dependency multiple times
+2. Handles circular dependency cases to prevent infinite recursion
+3. Creates a new link node and inserts it into both chains
+4. Updates the previous and next pointers of the doubly-linked lists to ensure the complete list structure
+
+```
+Initial state:
+Signal A     Effect 1
+ subs=nil     deps=nil
+ 
+Execute reactive.link(Signal A, Effect 1):
+
+Create new link node:
++-------------------+
+| Link {            |
+|   dep = Signal A  |
+|   sub = Effect 1  |
+|   prevSub = nil   |
+|   nextSub = nil   |
+|   prevDep = nil   |
+|   nextDep = nil   |
+| }                 |
++-------------------+
+
+Update Signal A and Effect 1:
+Signal A            Effect 1
+ subs=Link           deps=Link
+ subsTail=Link       depsTail=Link
+```
+
+### Unlink Process
+
+When a dependency relationship is no longer needed (e.g., when an effect is cleaned up or re-executed without needing a specific dependency), the system removes these relationships:
+
+1. Removes the link node from the dependency chain (horizontal direction)
+2. Removes the link node from the subscriber chain (vertical direction)
+3. Handles special cases, like cleanup when the last subscriber is removed
+
+```
+Initial state:
+Signal A                 Effect 1
+ subs=Link                deps=Link
+ subsTail=Link            depsTail=Link
+ 
+   +-------------------+
+   | Link {            |
+   |   dep = Signal A  |
+   |   sub = Effect 1  |
+   |   prevSub = nil   |
+   |   nextSub = nil   |
+   |   prevDep = nil   |
+   |   nextDep = nil   |
+   | }                 |
+   +-------------------+
+
+Execute reactive.unlink(Link, Effect 1):
+
+Remove link:
+Signal A           Effect 1
+ subs=nil           deps=nil
+ subsTail=nil       depsTail=nil
+```
+
+### Complex Scenario Example
+
+In practical applications, the dependency relationship network can be very complex:
+
+```
+Signal A ---> Effect 1 ---> Signal B ---> Effect 2
+    |                           |
+    |                           v
+    +----------------------> Computed C ---> Effect 3
+                               |
+                               v
+                            Signal D
+```
+
+This complex dependency relationship is efficiently managed through the doubly-linked list structure, achieving O(1) time complexity for dependency operations.
+
 ## Considerations
 
 1. Performance Optimization
@@ -150,20 +286,30 @@ The system uses the following techniques to implement reactivity:
    - Effects no longer in use are automatically cleaned up
    - Use effectScope to manage multiple effects in complex components
 
+4. Lua 5.1 Compatibility
+   - Supports Lua 5.1 which doesn't have __pairs and __ipairs metamethods
+   - Use HybridReactive.pairs and HybridReactive.ipairs instead of standard pairs/ipairs
+   - All examples and tests are compatible with both Lua 5.1 and newer versions
+
 ## Complete API Reference
 
 ```lua
-local reactive = require("reactive")
+local reactive = require("HybridReactive")
 
 -- Core APIs
-local signal = reactive.signal       -- Create a reactive signal
+local ref = reactive.ref             -- Create a reactive reference
+local reactive = reactive.reactive   -- Create a reactive object
 local computed = reactive.computed   -- Create a computed property
-local effect = reactive.effect       -- Create an effect
+local watch = reactive.watch         -- Create a watcher
 local effectScope = reactive.effectScope  -- Create an effect scope
 
 -- Batch processing APIs
 local startBatch = reactive.startBatch  -- Start batch updates
 local endBatch = reactive.endBatch      -- End batch updates and execute updates
+
+-- Lua 5.1 compatibility APIs
+local rpairs = reactive.pairs        -- Alternative to pairs for reactive objects
+local ripairs = reactive.ipairs      -- Alternative to ipairs for reactive arrays
 ```
 
 ## License

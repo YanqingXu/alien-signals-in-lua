@@ -4,7 +4,7 @@
 
 ## 项目简介
 
-本项目派生自[https://github.com/stackblitz/alien-signals](https://github.com/stackblitz/alien-signals)，是原TypeScript版本响应式系统的Lua实现。
+本项目移植自[stackblitz/alien-signals](https://github.com/stackblitz/alien-signals)，是原TypeScript版本响应式系统的Lua实现。
 
 Alien Signals是一个高效的响应式编程系统，它通过简洁而强大的API，为应用提供自动依赖追踪和响应式数据流管理能力。
 
@@ -133,6 +133,140 @@ endBatch() -- 输出：结果: 30
    - 智能合并多次更新，减少不必要的计算
    - 支持批量更新以提高性能
 
+## 链表结构详解
+
+Alien Signals 的核心是通过双向链表（doubly-linked list）结构实现的依赖追踪系统。每个链接节点同时存在于两个不同的链表中，实现了高效的依赖收集和通知传播。
+
+### 链表节点结构
+
+每个链接节点包含以下字段：
+
+```lua
+{
+    dep = dep,        -- 依赖对象（Signal或Computed）
+    sub = sub,        -- 订阅者对象（Effect或Computed）
+    prevSub = prevSub, -- 订阅者链表中的前一个节点
+    nextSub = nextSub, -- 订阅者链表中的下一个节点
+    prevDep = prevDep, -- 依赖链表中的前一个节点
+    nextDep = nextDep  -- 依赖链表中的下一个节点
+}
+```
+
+### 双向链表示意图
+
+系统中的链表结构可以表示为如下形式：
+
+```
+依赖关系图结构：
+
++-------------+          +--------------+          +--------------+
+|    Signal   |          |   Computed   |          |    Effect    |
+|  (数据源)    |          | (计算属性)    |          |  (副作用)     |
++-------------+          +--------------+          +--------------+
+       ^                        ^                         ^
+       |                        |                         |
+       |                        |                         |
+       v                        v                         v
++-----------------+    +-----------------+    +-----------------+
+| 订阅者链表 (垂直) |    | 订阅者链表 (垂直) |    | 订阅者链表 (垂直) |
++-----------------+    +-----------------+    +-----------------+
+       ^                        ^                         ^
+       |                        |                         |
+       |                        |                         |
++======================================================================================================================+
+|                                            链接节点(Link)                                                           |
++======================================================================================================================+
+       |                        |                         |
+       |                        |                         |
+       v                        v                         v
++-----------------+    +-----------------+    +-----------------+
+|  依赖链表 (水平)  |    |  依赖链表 (水平)  |    |  依赖链表 (水平)  |
++-----------------+    +-----------------+    +-----------------+
+```
+
+### 链接(link)过程
+
+当一个响应式对象（如Signal或Computed）被访问时，系统会建立它与当前活跃副作用（Effect）之间的依赖关系：
+
+1. 检查重复依赖，避免同一依赖被多次添加
+2. 处理循环依赖情况，防止无限递归
+3. 创建新的链接节点，同时插入两个链表
+4. 更新双向链表的前后指针，确保完整的链表结构
+
+```
+初始状态:
+Signal A     Effect 1
+ subs=nil     deps=nil
+ 
+执行 reactive.link(Signal A, Effect 1):
+
+创建新链接节点：
++-------------------+
+| Link {            |
+|   dep = Signal A  |
+|   sub = Effect 1  |
+|   prevSub = nil   |
+|   nextSub = nil   |
+|   prevDep = nil   |
+|   nextDep = nil   |
+| }                 |
++-------------------+
+
+更新Signal A和Effect 1:
+Signal A            Effect 1
+ subs=Link           deps=Link
+ subsTail=Link       depsTail=Link
+```
+
+### 解除链接(unlink)过程
+
+当依赖关系不再需要时（例如，副作用被清理或重新执行不再需要特定依赖），系统会移除这些依赖关系：
+
+1. 从依赖链表中移除链接节点（水平方向）
+2. 从订阅者链表中移除链接节点（垂直方向）
+3. 处理特殊情况，如最后一个订阅者被移除时的清理
+
+```
+初始状态:
+Signal A                 Effect 1
+ subs=Link                deps=Link
+ subsTail=Link            depsTail=Link
+ 
+   +-------------------+
+   | Link {            |
+   |   dep = Signal A  |
+   |   sub = Effect 1  |
+   |   prevSub = nil   |
+   |   nextSub = nil   |
+   |   prevDep = nil   |
+   |   nextDep = nil   |
+   | }                 |
+   +-------------------+
+
+执行 reactive.unlink(Link, Effect 1):
+
+移除链接:
+Signal A           Effect 1
+ subs=nil           deps=nil
+ subsTail=nil       depsTail=nil
+```
+
+### 复杂场景示例
+
+在实际应用中，依赖关系网络可能非常复杂：
+
+```
+Signal A ---> Effect 1 ---> Signal B ---> Effect 2
+    |                           |
+    |                           v
+    +----------------------> Computed C ---> Effect 3
+                               |
+                               v
+                            Signal D
+```
+
+这种复杂的依赖关系通过双向链表结构高效管理，实现了O(1)时间复杂度的依赖操作。
+
 ## 注意事项
 
 1. 性能优化
@@ -150,20 +284,30 @@ endBatch() -- 输出：结果: 30
    - 不再使用的副作用会被自动清理
    - 使用 effectScope 管理复杂组件的多个副作用函数
 
+4. Lua 5.1 兼容性
+   - 支持Lua 5.1（该版本不支持__pairs和__ipairs元方法）
+   - 使用HybridReactive.pairs和HybridReactive.ipairs代替标准pairs/ipairs
+   - 所有示例和测试都兼容Lua 5.1和更新版本
+
 ## 完整API参考
 
 ```lua
-local reactive = require("reactive")
+local reactive = require("HybridReactive")
 
 -- 核心API
-local signal = reactive.signal       -- 创建响应式信号
+local ref = reactive.ref             -- 创建响应式引用
+local reactive = reactive.reactive   -- 创建响应式对象
 local computed = reactive.computed   -- 创建计算属性  
-local effect = reactive.effect       -- 创建副作用
+local watch = reactive.watch         -- 创建侦听器
 local effectScope = reactive.effectScope  -- 创建副作用作用域
 
 -- 批量处理API
 local startBatch = reactive.startBatch  -- 开始批量更新
 local endBatch = reactive.endBatch      -- 结束批量更新并执行更新
+
+-- Lua 5.1 兼容API
+local rpairs = reactive.pairs        -- 用于遍历响应式对象的pairs替代品
+local ripairs = reactive.ipairs      -- 用于遍历响应式数组的ipairs替代品
 ```
 
 ## 许可证
