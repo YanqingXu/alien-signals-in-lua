@@ -285,8 +285,7 @@ Signal A ---> Effect 1 ---> Signal B ---> Effect 2
    - 使用 effectScope 管理复杂组件的多个副作用函数
 
 4. Lua 5.1 兼容性
-   - 支持Lua 5.1（该版本不支持__pairs和__ipairs元方法）
-   - 使用HybridReactive.pairs和HybridReactive.ipairs代替标准pairs/ipairs
+   - 支持Lua 5.1
    - 所有示例和测试都兼容Lua 5.1和更新版本
 
 ## 完整API参考

@@ -287,8 +287,7 @@ This complex dependency relationship is efficiently managed through the doubly-l
    - Use effectScope to manage multiple effects in complex components
 
 4. Lua 5.1 Compatibility
-   - Supports Lua 5.1 which doesn't have __pairs and __ipairs metamethods
-   - Use HybridReactive.pairs and HybridReactive.ipairs instead of standard pairs/ipairs
+   - Supports Lua 5.1
    - All examples and tests are compatible with both Lua 5.1 and newer versions
 
 ## Complete API Reference
