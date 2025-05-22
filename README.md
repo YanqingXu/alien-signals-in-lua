@@ -292,22 +292,17 @@ Signal A ---> Effect 1 ---> Signal B ---> Effect 2
 ## 完整API参考
 
 ```lua
-local reactive = require("HybridReactive")
+local reactive = require("reactive")
 
 -- 核心API
-local ref = reactive.ref             -- 创建响应式引用
 local reactive = reactive.reactive   -- 创建响应式对象
 local computed = reactive.computed   -- 创建计算属性  
-local watch = reactive.watch         -- 创建侦听器
 local effectScope = reactive.effectScope  -- 创建副作用作用域
 
 -- 批量处理API
 local startBatch = reactive.startBatch  -- 开始批量更新
 local endBatch = reactive.endBatch      -- 结束批量更新并执行更新
 
--- Lua 5.1 兼容API
-local rpairs = reactive.pairs        -- 用于遍历响应式对象的pairs替代品
-local ripairs = reactive.ipairs      -- 用于遍历响应式数组的ipairs替代品
 ```
 
 ## 许可证

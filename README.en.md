@@ -294,22 +294,17 @@ This complex dependency relationship is efficiently managed through the doubly-l
 ## Complete API Reference
 
 ```lua
-local reactive = require("HybridReactive")
+local reactive = require("reactive")
 
 -- Core APIs
-local ref = reactive.ref             -- Create a reactive reference
 local reactive = reactive.reactive   -- Create a reactive object
 local computed = reactive.computed   -- Create a computed property
-local watch = reactive.watch         -- Create a watcher
 local effectScope = reactive.effectScope  -- Create an effect scope
 
 -- Batch processing APIs
 local startBatch = reactive.startBatch  -- Start batch updates
 local endBatch = reactive.endBatch      -- End batch updates and execute updates
 
--- Lua 5.1 compatibility APIs
-local rpairs = reactive.pairs        -- Alternative to pairs for reactive objects
-local ripairs = reactive.ipairs      -- Alternative to ipairs for reactive arrays
 ```
 
 ## License
