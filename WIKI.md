@@ -498,3 +498,386 @@ These technical innovations enable Alien Signals to achieve extremely high perfo
 ---
 
 *This technical document provides a detailed analysis of the core implementation principles of Alien Signals, offering theoretical foundation for deep understanding and optimization of reactive systems.*
+
+---
+
+## Complex Use Case In-Depth Analysis
+
+### Shopping Cart Reactive System Case Study
+
+Let's explore the reactive mechanisms of Alien Signals through a complete shopping cart system. This case demonstrates complex multi-level dependencies, batch updates, and intricate interactions between effects.
+
+#### Use Case Code
+
+```lua
+local reactive = require("reactive")
+local signal = reactive.signal
+local computed = reactive.computed
+local effect = reactive.effect
+
+-- 1. Basic data signals
+local itemPrice = signal(100)      -- Item unit price
+local quantity = signal(2)         -- Item quantity
+local discountRate = signal(0.1)   -- Discount rate
+local taxRate = signal(0.08)       -- Tax rate
+
+-- 2. First-level computed values
+local subtotal = computed(function()
+    print("Computing subtotal")
+    return itemPrice() * quantity()
+end)
+
+local discountAmount = computed(function()
+    print("Computing discountAmount")
+    return subtotal() * discountRate()
+end)
+
+-- 3. Second-level computed values
+local afterDiscount = computed(function()
+    print("Computing afterDiscount")
+    return subtotal() - discountAmount()
+end)
+
+local taxAmount = computed(function()
+    print("Computing taxAmount")
+    return afterDiscount() * taxRate()
+end)
+
+-- 4. Final computed value
+local finalTotal = computed(function()
+    print("Computing finalTotal")
+    return afterDiscount() + taxAmount()
+end)
+
+-- 5. Side effect: UI updates
+local uiUpdateCount = signal(0)
+effect(function()
+    print("UI Update - Total: " .. finalTotal())
+    uiUpdateCount(uiUpdateCount() + 1)
+end)
+
+-- 6. Side effect: Logging
+effect(function()
+    print("Log - Subtotal: " .. subtotal() .. ", Discount: " .. discountAmount())
+end)
+
+-- Test updates
+print("=== Initialization Complete ===")
+print("=== Update Quantity ===")
+quantity(3)
+
+print("=== Batch Update Price and Discount ===")
+reactive.startBatch()
+itemPrice(120)
+discountRate(0.15)
+reactive.endBatch()
+```
+
+#### Dependency Graph
+
+```
+Dependency Graph Structure:
+                    itemPrice(100)    quantity(2)
+                          \              /
+                           \            /
+                            \          /
+                         subtotal(200)
+                        /             \
+                       /               \
+              discountRate(0.1)     taxRate(0.08)
+                     |                    |
+               discountAmount(20)         |
+                     |                    |
+                     \                    |
+                      \                   |
+                   afterDiscount(180)     |
+                          \               |
+                           \              |
+                            \             |
+                         taxAmount(14.4)  |
+                              \           |
+                               \          |
+                                \         |
+                              finalTotal(194.4)
+                                 /        \
+                                /          \
+                         UI Effect    Log Effect
+```
+
+#### Detailed Execution Flow Analysis
+
+##### Stage 1: System Initialization
+
+```
+Steps 1-4: Create basic signals
+itemPrice = Signal{value: 100, subs: null, flags: Mutable}
+quantity = Signal{value: 2, subs: null, flags: Mutable}
+discountRate = Signal{value: 0.1, subs: null, flags: Mutable}
+taxRate = Signal{value: 0.08, subs: null, flags: Mutable}
+
+Step 5: Create subtotal computed
+subtotal = Computed{
+    value: null,
+    getter: function,
+    deps: null,
+    subs: null,
+    flags: Mutable|Dirty
+}
+
+Step 6: Create discountAmount computed
+discountAmount = Computed{
+    value: null,
+    getter: function,
+    deps: null,
+    subs: null,
+    flags: Mutable|Dirty
+}
+
+... other computeds similar ...
+```
+
+##### Stage 2: Effect Creation and First Execution
+
+```
+Step 9: Create UI Effect
+uiEffect = Effect{
+    fn: function,
+    deps: null,
+    subs: null,
+    flags: Watching
+}
+
+Step 10: Execute UI Effect function
+g_activeSub = uiEffect  // Set active subscriber
+
+Call finalTotal()
+├─ g_activeSub exists, establish dependency: finalTotal -> uiEffect
+├─ finalTotal.flags = Mutable|Dirty, needs computation
+├─ Call finalTotal.getter()
+│  ├─ Call afterDiscount()
+│  │  ├─ Establish dependency: afterDiscount -> finalTotal
+│  │  ├─ afterDiscount.flags = Mutable|Dirty, needs computation
+│  │  ├─ Call afterDiscount.getter()
+│  │  │  ├─ Call subtotal()
+│  │  │  │  ├─ Establish dependency: subtotal -> afterDiscount
+│  │  │  │  ├─ subtotal.flags = Mutable|Dirty, needs computation
+│  │  │  │  ├─ Call subtotal.getter()
+│  │  │  │  │  ├─ Call itemPrice()
+│  │  │  │  │  │  ├─ Establish dependency: itemPrice -> subtotal
+│  │  │  │  │  │  └─ Return 100
+│  │  │  │  │  ├─ Call quantity()
+│  │  │  │  │  │  ├─ Establish dependency: quantity -> subtotal
+│  │  │  │  │  │  └─ Return 2
+│  │  │  │  │  └─ Return 100 * 2 = 200
+│  │  │  │  ├─ subtotal.value = 200
+│  │  │  │  └─ Return 200
+│  │  │  ├─ Call discountAmount()
+│  │  │  │  ├─ Establish dependency: discountAmount -> afterDiscount
+│  │  │  │  ├─ discountAmount.flags = Mutable|Dirty, needs computation
+│  │  │  │  ├─ Call discountAmount.getter()
+│  │  │  │  │  ├─ Call subtotal() (already computed, return directly)
+│  │  │  │  │  │  ├─ Establish dependency: subtotal -> discountAmount
+│  │  │  │  │  │  └─ Return 200
+│  │  │  │  │  ├─ Call discountRate()
+│  │  │  │  │  │  ├─ Establish dependency: discountRate -> discountAmount
+│  │  │  │  │  │  └─ Return 0.1
+│  │  │  │  │  └─ Return 200 * 0.1 = 20
+│  │  │  │  ├─ discountAmount.value = 20
+│  │  │  │  └─ Return 20
+│  │  │  └─ Return 200 - 20 = 180
+│  │  ├─ afterDiscount.value = 180
+│  │  └─ Return 180
+│  ├─ Call taxAmount()
+│  │  ├─ Establish dependency: taxAmount -> finalTotal
+│  │  ├─ taxAmount.flags = Mutable|Dirty, needs computation
+│  │  ├─ Call taxAmount.getter()
+│  │  │  ├─ Call afterDiscount() (already computed, return directly)
+│  │  │  │  ├─ Establish dependency: afterDiscount -> taxAmount
+│  │  │  │  └─ Return 180
+│  │  │  ├─ Call taxRate()
+│  │  │  │  ├─ Establish dependency: taxRate -> taxAmount
+│  │  │  │  └─ Return 0.08
+│  │  │  └─ Return 180 * 0.08 = 14.4
+│  │  ├─ taxAmount.value = 14.4
+│  │  └─ Return 14.4
+│  └─ Return 180 + 14.4 = 194.4
+├─ finalTotal.value = 194.4
+└─ Return 194.4
+
+Output: "UI Update - Total: 194.4"
+
+g_activeSub = null  // Restore
+```
+
+##### Stage 3: Single Update - quantity(3)
+
+```
+Step 1: Update signal
+quantity.value = 3
+quantity.flags = Mutable|Dirty
+
+Step 2: Propagate dirty state
+Call reactive.propagate(quantity.subs)
+├─ link = quantity.subs (points to subtotal)
+├─ sub = subtotal
+├─ processSubscriberFlags(subtotal, subtotal.flags, link)
+│  ├─ subtotal.flags contains Mutable
+│  ├─ Set subtotal.flags |= Pending
+│  └─ Return processed flags
+├─ subtotal is Mutable, continue propagating to subtotal.subs
+├─ Traverse all subscribers of subtotal:
+│  ├─ discountAmount: Set Pending flag
+│  └─ afterDiscount: Set Pending flag
+├─ Continue propagating to afterDiscount's subscribers:
+│  ├─ taxAmount: Set Pending flag
+│  └─ finalTotal: Set Pending flag
+└─ Finally propagate to finalTotal's subscribers:
+   └─ uiEffect: Call reactive.notify(uiEffect)
+
+Step 3: Execute side effects
+reactive.flush()
+├─ Dequeue uiEffect from queue
+├─ uiEffect.flags contains Dirty|Pending
+├─ Call reactive.checkDirty(uiEffect.deps, uiEffect)
+│  ├─ Check finalTotal dependency
+│  ├─ finalTotal.flags contains Pending, needs checking
+│  ├─ Recursively check finalTotal's dependencies
+│  │  ├─ afterDiscount: Pending, continue checking
+│  │  │  ├─ subtotal: Pending, continue checking
+│  │  │  │  ├─ itemPrice: No change
+│  │  │  │  └─ quantity: Dirty! Return true
+│  │  │  └─ Found dependency is indeed dirty
+│  │  └─ afterDiscount needs update
+│  └─ Return true (indeed needs update)
+├─ Re-execute uiEffect.fn
+│  ├─ Call finalTotal()
+│  │  ├─ finalTotal marked as Pending, needs dependency check
+│  │  ├─ Call reactive.checkDirty confirms need to update
+│  │  ├─ Recompute finalTotal
+│  │  │  ├─ afterDiscount needs recomputation
+│  │  │  │  ├─ subtotal needs recomputation
+│  │  │  │  │  ├─ itemPrice(): 100 (no change)
+│  │  │  │  │  ├─ quantity(): 3 (updated)
+│  │  │  │  │  └─ Return 100 * 3 = 300
+│  │  │  │  ├─ discountAmount needs recomputation
+│  │  │  │  │  ├─ subtotal(): 300
+│  │  │  │  │  ├─ discountRate(): 0.1
+│  │  │  │  │  └─ Return 300 * 0.1 = 30
+│  │  │  │  └─ Return 300 - 30 = 270
+│  │  │  ├─ taxAmount needs recomputation
+│  │  │  │  ├─ afterDiscount(): 270
+│  │  │  │  ├─ taxRate(): 0.08
+│  │  │  │  └─ Return 270 * 0.08 = 21.6
+│  │  │  └─ Return 270 + 21.6 = 291.6
+│  │  └─ Return 291.6
+│  └─ Output: "UI Update - Total: 291.6"
+└─ logEffect executes similarly...
+
+Output: "Computing subtotal"
+Output: "Computing discountAmount"
+Output: "Computing afterDiscount"
+Output: "Computing taxAmount"
+Output: "Computing finalTotal"
+Output: "UI Update - Total: 291.6"
+Output: "Log - Subtotal: 300, Discount: 30"
+```
+
+##### Stage 4: Batch Update
+
+```
+Step 1: Start batch
+reactive.startBatch()
+├─ g_batchDepth = 1
+└─ Side effects won't execute immediately
+
+Step 2: Update itemPrice(120)
+itemPrice.value = 120
+itemPrice.flags = Mutable|Dirty
+Call reactive.propagate(itemPrice.subs)
+├─ Propagate to subtotal and its downstream
+├─ All related computeds marked as Pending
+├─ uiEffect queued but not executed (because g_batchDepth > 0)
+└─ logEffect queued but not executed
+
+Step 3: Update discountRate(0.15)
+discountRate.value = 0.15
+discountRate.flags = Mutable|Dirty
+Call reactive.propagate(discountRate.subs)
+├─ Propagate to discountAmount and its downstream
+├─ Related computeds marked as Pending
+├─ Effects already in queue, not duplicated
+└─ Still not executed (batch mode)
+
+Step 4: End batch
+reactive.endBatch()
+├─ g_batchDepth = 0
+├─ Call reactive.flush()
+├─ Execute all effects in queue
+│  ├─ uiEffect executes once (not twice!)
+│  │  ├─ Check dirty state of all dependencies
+│  │  ├─ Recompute entire dependency chain
+│  │  │  ├─ subtotal: 120 * 3 = 360
+│  │  │  ├─ discountAmount: 360 * 0.15 = 54
+│  │  │  ├─ afterDiscount: 360 - 54 = 306
+│  │  │  ├─ taxAmount: 306 * 0.08 = 24.48
+│  │  │  └─ finalTotal: 306 + 24.48 = 330.48
+│  │  └─ Output: "UI Update - Total: 330.48"
+│  └─ logEffect executes similarly
+└─ Clear queue
+
+Output: "Computing subtotal"
+Output: "Computing discountAmount"
+Output: "Computing afterDiscount"
+Output: "Computing taxAmount"
+Output: "Computing finalTotal"
+Output: "UI Update - Total: 330.48"
+Output: "Log - Subtotal: 360, Discount: 54"
+```
+
+#### Memory State Transition Diagram
+
+```
+Memory state after initialization:
+
+itemPrice                     quantity
+   |                             |
+   v                             v
+subtotal <-------------------> discountAmount
+   |                             |
+   v                             v
+afterDiscount <--------------> taxAmount
+   |                             |
+   v                             v
+finalTotal
+   |
+   v
+[uiEffect, logEffect]
+
+Detailed link structure view:
+itemPrice.subs -> Link{dep: itemPrice, sub: subtotal, nextSub: null}
+quantity.subs -> Link{dep: quantity, sub: subtotal, nextSub: null}
+subtotal.subs -> Link{dep: subtotal, sub: discountAmount, nextSub: Link{dep: subtotal, sub: afterDiscount}}
+...
+
+Update propagation path:
+quantity(3) -> subtotal -> [discountAmount, afterDiscount] -> [taxAmount, finalTotal] -> [uiEffect, logEffect]
+```
+
+#### Performance Analysis
+
+1. **Computation Count Statistics**:
+   - Initialization: Each computed calculates once
+   - Single update: Only recomputes affected computeds
+   - Batch update: All changes merged, each computed calculates at most once
+
+2. **Memory Usage**:
+   - Doubly-linked lists: O(E) space, where E is number of dependency edges
+   - State flags: O(1) bit operations, efficient memory usage
+   - Automatic cleanup: No memory leaks
+
+3. **Time Complexity**:
+   - Signal update: O(S), where S is number of direct and indirect subscribers
+   - Dependency check: O(D), where D is dependency depth
+   - Batch update: O(N), where N is number of affected nodes
+
+This complex use case demonstrates how Alien Signals achieves an elegant reactive programming experience while maintaining high performance through clever algorithmic design.
