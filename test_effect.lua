@@ -280,5 +280,21 @@ test('should handle flags are indirectly updated during checkDirty', function()
     print("test passed\n")
 end)
 
+test('should handle boolean value', function()
+    local a = signal(true)
+    local b = computed(function() return a() end)
+
+    local triggers = 0
+
+    effect(function()
+        b()
+        triggers = triggers + 1
+    end)
+    expect(triggers).toBe(1)
+    a(false)
+    expect(triggers).toBe(2)
+    print("test passed\n")
+end)
+
 print("========== All tests passed!!! ==========\n")
 print("====================================================\n")

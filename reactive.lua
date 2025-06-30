@@ -792,11 +792,11 @@ function reactive.checkDirty(link, sub)
         local dirty, shouldReturn, shouldContinue
         link, sub, stack, checkDepth, dirty, shouldReturn, shouldContinue =
             processDirtyCheckStep(link, sub, stack, checkDepth)
-        
+
         if shouldReturn then
             return dirty
         end
-        
+
         if not shouldContinue then
             break
         end
@@ -982,7 +982,7 @@ end
  * - 当不带参数调用时：作为获取器，返回当前值并注册依赖
 ]]
 local function signalOper(this, newValue)
-    if newValue then
+    if newValue ~= nil then
         -- Set operation (when called with a value)
         -- 设置操作（当使用值调用时）
         if newValue ~= this.value then
