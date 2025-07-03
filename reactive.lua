@@ -1328,4 +1328,6 @@ return {
 
     -- Advanced API (for internal or advanced usage) / 高级 API（用于内部或高级用法）
     setCurrentSub = reactive.setCurrentSub,  -- Set current subscriber / 设置当前订阅者
+    pauseTracking = reactive.pauseTracking,  -- Pause dependency tracking / 暂停依赖跟踪
+    resumeTracking = reactive.resumeTracking, -- Resume dependency tracking / 恢复依赖跟踪
 }

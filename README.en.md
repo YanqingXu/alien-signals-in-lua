@@ -77,9 +77,258 @@ cleanup()  -- Cleans up all effect functions in the scope
 count(5)  -- Won't trigger any output
 ```
 
-## Advanced Features
+## HybridReactive - Vue.js Style API
 
-### Batch Updates
+In addition to the low-level reactive system, this project also provides a Vue.js-like high-level reactive API - HybridReactive, which offers a more friendly and intuitive interface.
+
+### Core APIs
+
+- `ref(value)` - Create reactive reference
+- `reactive(obj, shallow)` - Convert object to reactive object (supports deep/shallow reactivity)
+- `computed(fn)` - Create computed property
+
+### Watching APIs
+
+- `watch(callback)` - Watch reactive data changes
+- `watchRef(ref, callback)` - Watch ref object changes
+- `watchReactive(reactive, callback, shallow)` - Watch reactive object property changes
+
+### Utility Functions
+
+- `isRef(value)` - Check if value is a ref object
+- `isReactive(value)` - Check if value is a reactive object
+
+### Basic Usage
+
+```lua
+local HybridReactive = require("HybridReactive")
+
+-- Create reactive reference
+local count = HybridReactive.ref(0)
+local name = HybridReactive.ref("Alice")
+
+-- Access and modify values
+print(count.value)  -- 0
+count.value = 10
+print(count.value)  -- 10
+
+-- Create computed property
+local doubled = HybridReactive.computed(function()
+    return count.value * 2
+end)
+
+print(doubled.value)  -- 20
+
+-- Create reactive object
+local state = HybridReactive.reactive({
+    user = "Bob",
+    age = 25
+})
+
+print(state.user)  -- Bob
+state.age = 30
+print(state.age)   -- 30
+```
+
+### `reactive(obj, shallow)`
+
+Convert a plain object to a reactive object.
+
+**Parameters:**
+- `obj`: Object to convert
+- `shallow`: Optional boolean, defaults to `false`
+  - `false` (default): Deep reactivity, nested objects are also converted to reactive
+  - `true`: Shallow reactivity, only first-level properties are reactive
+
+**Deep Reactivity (default behavior):**
+```lua
+local obj = HybridReactive.reactive({
+    user = {
+        name = "Alice",
+        profile = {
+            age = 25,
+            address = { city = "Beijing" }
+        }
+    }
+})
+
+-- All nested objects are reactive
+print(HybridReactive.isReactive(obj.user))                    -- true
+print(HybridReactive.isReactive(obj.user.profile))           -- true
+print(HybridReactive.isReactive(obj.user.profile.address))   -- true
+
+-- Can watch changes at any level
+obj.user.name = "Bob"                    -- Triggers reactive update
+obj.user.profile.age = 30                -- Triggers reactive update
+obj.user.profile.address.city = "Shanghai"  -- Triggers reactive update
+```
+
+**Shallow Reactivity:**
+```lua
+local obj = HybridReactive.reactive({
+    user = { name = "Alice", age = 25 },
+    settings = { theme = "light" }
+}, true)  -- shallow = true
+
+-- Only first level is reactive
+print(HybridReactive.isReactive(obj.user))     -- false
+print(HybridReactive.isReactive(obj.settings)) -- false
+
+-- Can only watch first-level changes
+obj.user = { name = "Bob", age = 30 }      -- Triggers reactive update
+obj.user.name = "Charlie"                  -- Won't trigger reactive update (user is not reactive)
+```
+
+### watchRef - Watch ref object changes
+
+`watchRef` is a function specifically designed to watch ref object changes. It calls the callback function when the ref's value changes, providing both new and old values as parameters.
+
+#### Syntax
+
+```lua
+local stopWatching = HybridReactive.watchRef(refObj, callback)
+```
+
+- `refObj`: The ref object to watch
+- `callback`: Callback function that receives `(newValue, oldValue)` parameters
+- Return value: Function to stop watching
+
+#### Usage Example
+
+```lua
+local HybridReactive = require("HybridReactive")
+
+-- Watch number changes
+local counter = HybridReactive.ref(0)
+
+local stopWatching = HybridReactive.watchRef(counter, function(newValue, oldValue)
+    print(string.format("Counter changed from %d to %d", oldValue, newValue))
+end)
+
+counter.value = 1  -- Output: Counter changed from 0 to 1
+counter.value = 5  -- Output: Counter changed from 1 to 5
+counter.value = 5  -- Won't trigger callback (value unchanged)
+
+-- Stop watching
+stopWatching()
+counter.value = 10 -- Won't trigger callback
+```
+
+### watchReactive - Watch reactive object changes
+
+`watchReactive` is a function specifically designed to watch reactive object property changes. It calls the callback function when any property of the reactive object changes.
+
+#### Syntax
+
+```lua
+local stopWatching = HybridReactive.watchReactive(reactiveObj, callback, shallow)
+```
+
+- `reactiveObj`: The reactive object to watch
+- `callback`: Callback function that receives `(key, newValue, oldValue, path)` parameters
+- `shallow`: Optional boolean, defaults to `false`
+  - `false` (default): Deep watching, recursively watch nested object changes
+  - `true`: Shallow watching, only watch first-level property changes
+- Return value: Function to stop watching
+
+#### Basic Usage Example
+
+```lua
+local HybridReactive = require("HybridReactive")
+
+-- Create reactive object
+local user = HybridReactive.reactive({
+    name = "Alice",
+    age = 25,
+    profile = {
+        email = "alice@example.com",
+        settings = {
+            theme = "light"
+        }
+    }
+})
+
+-- Deep watching (default)
+local stopWatching = HybridReactive.watchReactive(user, function(key, newValue, oldValue, path)
+    print(string.format("Property '%s' at path '%s' changed from '%s' to '%s'",
+          key, path or key, tostring(oldValue), tostring(newValue)))
+end)
+
+user.name = "Bob"                           -- Output: Property 'name' at path 'name' changed from 'Alice' to 'Bob'
+user.profile.email = "bob@example.com"      -- Output: Property 'email' at path 'profile.email' changed from 'alice@example.com' to 'bob@example.com'
+user.profile.settings.theme = "dark"       -- Output: Property 'theme' at path 'profile.settings.theme' changed from 'light' to 'dark'
+
+-- Stop watching
+stopWatching()
+user.name = "Charlie"  -- Won't trigger callback
+```
+
+#### Shallow vs Deep Watching
+
+```lua
+local obj = HybridReactive.reactive({
+    user = {
+        name = "Alice",
+        profile = { age = 25 }
+    }
+})
+
+-- Shallow watching
+local stopShallow = HybridReactive.watchReactive(obj, function(key, newValue, oldValue, path)
+    print("Shallow watch:", key, path)
+end, true)  -- shallow = true
+
+-- Deep watching
+local stopDeep = HybridReactive.watchReactive(obj, function(key, newValue, oldValue, path)
+    print("Deep watch:", key, path)
+end, false)  -- shallow = false
+
+-- Replace entire user object (both will trigger)
+obj.user = { name: "Bob", profile: { age: 30 } }
+-- Output:
+-- Shallow watch: user user
+-- Deep watch: user user
+
+-- Modify nested property (only deep watch will trigger)
+obj.user.name = "Charlie"
+-- Output:
+-- Deep watch: name user.name
+
+obj.user.profile.age = 35
+-- Output:
+-- Deep watch: age user.profile.age
+
+stopShallow()
+stopDeep()
+```
+
+#### Same Property Names at Different Levels
+
+`watchReactive` can accurately distinguish same property names at different levels:
+
+```lua
+local obj = HybridReactive.reactive({
+    name = "root-name",           -- Root level name
+    user = {
+        name = "user-name",       -- User level name
+        profile = {
+            name = "profile-name" -- Profile level name
+        }
+    }
+})
+
+HybridReactive.watchReactive(obj, function(key, newValue, oldValue, path)
+    print(string.format("Property '%s' at path '%s' changed", key, path))
+end, false)
+
+obj.name = "new-root-name"                    -- Output: Property 'name' at path 'name' changed
+obj.user.name = "new-user-name"              -- Output: Property 'name' at path 'user.name' changed
+obj.user.profile.name = "new-profile-name"   -- Output: Property 'name' at path 'user.profile.name' changed
+```
+
+### Advanced Features
+
+#### Batch Updates
 
 When performing multiple state updates, you can use batch update mode to avoid triggering effects multiple times, improving performance.
 
@@ -290,21 +539,158 @@ This complex dependency relationship is efficiently managed through the doubly-l
    - Supports Lua 5.1
    - All examples and tests are compatible with both Lua 5.1 and newer versions
 
+## HybridReactive Test Suite
+
+To ensure the stability and correctness of HybridReactive functionality, the project provides a comprehensive test suite.
+
+### Test Files
+
+- **`test_hybrid_reactive.lua`** - Comprehensive test suite containing all HybridReactive functionality tests
+- **`run_hybrid_reactive_tests.lua`** - Dedicated test runner
+
+### Running Tests
+
+```bash
+# Run the complete HybridReactive test suite
+lua run_hybrid_reactive_tests.lua
+
+# Or run the test file directly
+lua test_hybrid_reactive.lua
+```
+
+### Test Coverage
+
+The test suite is divided into **6 main sections** with **17 comprehensive test cases**:
+
+#### 1. Basic Functionality Tests
+- Basic callback functionality verification
+- Shallow vs deep watching tests
+- Multiple watchers working together
+- Watcher lifecycle management
+
+#### 2. Path Tracking and Same Key Tests
+- Distinguishing same property names at different levels (`obj.name` vs `obj.user.name`)
+- Deep nested path accuracy verification
+
+#### 3. Advanced Feature Tests
+- Deep watching after object replacement
+- Mixed data type handling
+- Batch operation support
+
+#### 4. Error Handling and Edge Cases
+- Invalid parameter error handling
+- Circular reference scenario stability
+
+#### 5. Performance Tests
+- Large object performance (500+ properties)
+- Deep nesting performance (20+ levels)
+- Multiple watcher performance (50+ watchers)
+
+#### 6. Integration Tests
+- Integration with `ref` objects
+- Stress testing with rapid consecutive modifications
+
+### Performance Benchmarks
+
+Performance in standard test environment:
+- **500-property object setup**: ~2ms
+- **50 watcher setup**: ~1ms
+- **100 rapid modifications**: ~2ms
+- **20-level deep nesting**: ~1ms
+
+### Test Result Example
+
+```
+========== Comprehensive HybridReactive.watchReactive Test Suite ==========
+
+SECTION 1: Basic Functionality Tests
+=====================================
+[OK] Basic callback functionality
+[OK] Shallow vs deep monitoring
+[OK] Multiple watchers on same object
+[OK] Watcher lifecycle and cleanup
+
+SECTION 2: Path Tracking and Same Key Tests
+============================================
+[OK] Same key at different levels
+[OK] Path tracking accuracy
+
+... (other sections)
+
+[OK] ALL WATCHREACTIVE TESTS COMPLETED SUCCESSFULLY! [OK]
+```
+
 ## Complete API Reference
+
+### Low-level Reactive System (reactive.lua)
 
 ```lua
 local reactive = require("reactive")
 
 -- Core APIs
-local reactive = reactive.reactive   -- Create a reactive object
-local computed = reactive.computed   -- Create a computed property
-local effectScope = reactive.effectScope  -- Create an effect scope
+local signal = reactive.signal       -- Create reactive signal
+local computed = reactive.computed   -- Create computed property
+local effect = reactive.effect       -- Create effect
+local effectScope = reactive.effectScope  -- Create effect scope
 
 -- Batch processing APIs
 local startBatch = reactive.startBatch  -- Start batch updates
-local endBatch = reactive.endBatch      -- End batch updates and execute updates
-
+local endBatch = reactive.endBatch      -- End batch updates and execute
+local flush = reactive.flush            -- Immediately execute all pending effects
 ```
+
+### HybridReactive - Vue.js Style API
+
+```lua
+local HybridReactive = require("HybridReactive")
+
+-- Reactive data creation
+local ref = HybridReactive.ref           -- Create reactive reference
+local reactive = HybridReactive.reactive -- Create reactive object
+local computed = HybridReactive.computed -- Create computed property
+
+-- Watching APIs
+local watch = HybridReactive.watch             -- General watch function
+local watchRef = HybridReactive.watchRef       -- Watch ref objects specifically
+local watchReactive = HybridReactive.watchReactive -- Watch reactive objects specifically
+
+-- Utility functions
+local isRef = HybridReactive.isRef           -- Check if value is ref object
+local isReactive = HybridReactive.isReactive -- Check if value is reactive object
+
+-- Low-level APIs (exposed from reactive module)
+local effect = HybridReactive.effect         -- Create effect
+local startBatch = HybridReactive.startBatch -- Start batch updates
+local endBatch = HybridReactive.endBatch     -- End batch updates
+local flush = HybridReactive.flush           -- Immediately execute effects
+```
+
+## HybridReactive Feature Summary
+
+### Core Advantages
+
+1. **Vue.js Style API**: Provides familiar `ref`, `reactive`, `computed` APIs
+2. **Deep Reactivity**: Default support for deep nested object reactive conversion
+3. **Precise Watching**: `watchReactive` provides precise property change watching and path tracking
+4. **High Performance**: Based on efficient doubly-linked list dependency management system
+5. **Type Safety**: Strict type checking and error handling
+6. **Memory Safety**: Automatic cleanup of unused dependency relationships
+
+### Use Cases
+
+- **State Management**: State management and data flow control for complex applications
+- **Data Binding**: Implementing two-way data binding between data and views
+- **Reactive Computing**: Automatic computation and updates based on data changes
+- **Event Systems**: Building event-driven systems based on data changes
+- **Caching Systems**: Implementing smart caching and dependency invalidation mechanisms
+
+### Best Practices
+
+1. **Proper use of deep/shallow reactivity**: Choose appropriate reactivity depth based on needs
+2. **Utilize path information**: Use `watchReactive`'s path parameter for precise change handling
+3. **Timely cleanup of watchers**: Use returned stop functions to cleanup unnecessary watchers
+4. **Batch update optimization**: Use `startBatch`/`endBatch` for performance when making many updates
+5. **Avoid circular dependencies**: Design reasonable data structures to avoid complex circular dependencies
 
 ## License
 
