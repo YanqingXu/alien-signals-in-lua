@@ -115,6 +115,16 @@ local g_batchDepth = 0    -- Depth of nested batch operations / 嵌套批量操�
 local g_notifyIndex = 0   -- Current position in the effects queue / 副作用队列中的当前位置
 
 --[[
+ * Global version counter for dependency link deduplication
+ * 用于依赖链接去重的全局版本计数器
+ *
+ * This counter is incremented at the start of each tracking cycle to ensure
+ * that dependency links created in the same cycle can be properly deduplicated.
+ * 该计数器在每个跟踪周期开始时递增，以确保在同一周期内创建的依赖链接可以正确去重。
+]]
+local g_version = 0       -- Global version counter for link deduplication / 用于链接去重的全局版本计数器
+
+--[[
  * Sets the current subscriber (effect or computed) and returns the previous one
  * 设置当前订阅者（副作用或计算值）并返回之前的订阅者
  *
@@ -340,6 +350,7 @@ end
 ]]
 function reactive.createLink(dep, sub, prevSub, nextSub, prevDep, nextDep)
     return {
+        version = 0,      -- Version number for deduplication / 用于去重的版本号
         dep = dep,        -- The dependency object / 依赖对象
         sub = sub,        -- The subscriber object / 订阅者对象
         prevSub = prevSub, -- Previous link in the subscriber's chain / 订阅者链中的前一个链接
@@ -383,8 +394,7 @@ function reactive.link(dep, sub)
 
     -- Handle circular dependency detection
     -- 处理循环依赖检测
-    local recursedCheck = bit.band(sub.flags, ReactiveFlags.RecursedCheck)
-    if recursedCheck > 0 then
+    if bit.band(sub.flags, ReactiveFlags.RecursedCheck) > 0 then
         if prevDep then
             nextDep = prevDep.nextDep
         else
@@ -394,21 +404,23 @@ function reactive.link(dep, sub)
         -- If we already have this dependency in the chain during recursion check
         -- 如果在递归检查期间链中已经有这个依赖
         if nextDep and nextDep.dep == dep then
+            nextDep.version = g_version  -- Update version for current cycle / 为当前周期更新版本号
             sub.depsTail = nextDep
             return
         end
     end
 
-    -- Check if the sub is already subscribed to this dependency
-    -- 检查订阅者是否已经订阅了这个依赖
+    -- Check if the sub is already subscribed to this dependency using version-based deduplication
+    -- 使用基于版本号的去重检查订阅者是否已经订阅了这个依赖
     local prevSub = dep.subsTail
-    if prevSub and prevSub.sub == sub and (recursedCheck == 0 or reactive.isValidLink(prevSub, sub)) then
+    if prevSub and prevSub.version == g_version and prevSub.sub == sub then
         return
     end
 
     -- Create a new link and insert it in both chains
     -- 创建新链接并将其插入到两个链中
     local newLink = reactive.createLink(dep, sub, prevDep, nextDep, prevSub)
+    newLink.version = g_version  -- Set current version for deduplication / 设置当前版本号用于去重
     dep.subsTail = newLink  -- Add to dependency's subscribers chain / 添加到依赖的订阅者链
     sub.depsTail = newLink  -- Add to subscriber's dependencies chain / 添加到订阅者的依赖链
 
@@ -639,6 +651,10 @@ end
 -- Called when an effect or computed value is about to execute its function
 -- @param sub: The subscriber (effect or computed)
 function reactive.startTracking(sub)
+    -- Increment global version counter for this tracking cycle
+    -- 为此跟踪周期递增全局版本计数器
+    g_version = g_version + 1
+
     -- Reset dependency tail to collect dependencies from scratch
     sub.depsTail = nil
 
