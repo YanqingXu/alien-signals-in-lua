@@ -2,6 +2,9 @@
  * Alien Signals - A reactive programming system for Lua
  * Alien Signals - Lua 响应式编程系统
  *
+ * Version: 2.0.7 (compatible with alien-signals v2.0.7)
+ * 版本: 2.0.7 (兼容 alien-signals v2.0.7)
+ *
  * Derived from https://github.com/stackblitz/alien-signals
  * 源自 https://github.com/stackblitz/alien-signals
  *
@@ -122,7 +125,7 @@ local g_notifyIndex = 0   -- Current position in the effects queue / 副作用�
  * that dependency links created in the same cycle can be properly deduplicated.
  * 该计数器在每个跟踪周期开始时递增，以确保在同一周期内创建的依赖链接可以正确去重。
 ]]
-local g_version = 0       -- Global version counter for link deduplication / 用于链接去重的全局版本计数器
+local g_currentVersion = 0       -- Global current version counter for link deduplication / 用于链接去重的全局当前版本计数器
 
 --[[
  * Sets the current subscriber (effect or computed) and returns the previous one
@@ -395,6 +398,8 @@ function reactive.link(dep, sub)
     -- Handle circular dependency detection
     -- 处理循环依赖检测
     if bit.band(sub.flags, ReactiveFlags.RecursedCheck) > 0 then
+        -- Correctly handle the case where prevDep.nextDep might be nil
+        -- 正确处理prevDep.nextDep可能为nil的情况
         if prevDep then
             nextDep = prevDep.nextDep
         else
@@ -404,7 +409,7 @@ function reactive.link(dep, sub)
         -- If we already have this dependency in the chain during recursion check
         -- 如果在递归检查期间链中已经有这个依赖
         if nextDep and nextDep.dep == dep then
-            nextDep.version = g_version  -- Update version for current cycle / 为当前周期更新版本号
+            nextDep.version = g_currentVersion  -- Update version for current cycle / 为当前周期更新版本号
             sub.depsTail = nextDep
             return
         end
@@ -413,14 +418,16 @@ function reactive.link(dep, sub)
     -- Check if the sub is already subscribed to this dependency using version-based deduplication
     -- 使用基于版本号的去重检查订阅者是否已经订阅了这个依赖
     local prevSub = dep.subsTail
-    if prevSub and prevSub.version == g_version and prevSub.sub == sub then
+    if prevSub and prevSub.version == g_currentVersion and prevSub.sub == sub then
+        -- Only deduplicate if it's the same subscriber AND same tracking cycle (matching TypeScript logic)
+        -- 只有在同一个订阅者且同一个跟踪周期时才去重（匹配TypeScript逻辑）
         return
     end
 
     -- Create a new link and insert it in both chains
     -- 创建新链接并将其插入到两个链中
     local newLink = reactive.createLink(dep, sub, prevDep, nextDep, prevSub)
-    newLink.version = g_version  -- Set current version for deduplication / 设置当前版本号用于去重
+    newLink.version = g_currentVersion  -- Set current version for deduplication / 设置当前版本号用于去重
     dep.subsTail = newLink  -- Add to dependency's subscribers chain / 添加到依赖的订阅者链
     sub.depsTail = newLink  -- Add to subscriber's dependencies chain / 添加到订阅者的依赖链
 
@@ -612,39 +619,48 @@ function reactive.propagate(link)
     local next = link.nextSub
     local stack = nil
 
-    while link do
-        local sub = link.sub
-        local subSubs = handleSubscriberPropagation(sub, sub.flags, link)
+    -- Use repeat...until true to simulate continue statements (classic Lua pattern)
+    -- 使用repeat...until true模拟continue语句（经典Lua模式）
+    repeat
+        repeat
+            local sub = link.sub
+            local subSubs = handleSubscriberPropagation(sub, sub.flags, link)
 
-        -- If subscriber has children, dive deeper into the graph
-        -- 如果订阅者有子级，深入图中
-        if subSubs then
-            if subSubs.nextSub then
-                -- Push current next position to stack for later processing
-                -- 将当前的 next 位置推入栈以便后续处理
-                stack = {value = next, prev = stack}
-                next = subSubs.nextSub
+            -- Handle mutable subscribers (exactly matching TypeScript logic)
+            -- 处理可变订阅者（精确匹配TypeScript逻辑）
+            if subSubs then
+                -- const nextSub = (link = subSubs).nextSub;
+                link = subSubs
+                local nextSub = subSubs.nextSub
+                if nextSub then
+                    stack = {value = next, prev = stack}
+                    next = nextSub
+                end
+                break  -- continue; (equivalent to TypeScript's continue)
             end
-            link = subSubs
-        else
-            -- Move to next sibling
-            -- 移动到下一个兄弟节点
+
+            -- if ((link = next!) !== undefined)
             link = next
             if link then
                 next = link.nextSub
-            else
-                -- No more siblings, pop from stack
-                -- 没有更多兄弟节点，从栈中弹出
-                while stack and not link do
-                    link = stack.value
-                    stack = stack.prev
-                    if link then
-                        next = link.nextSub
-                    end
+                break  -- continue; (equivalent to TypeScript's continue)
+            end
+
+            -- while (stack !== undefined)
+            while stack do
+                link = stack.value
+                stack = stack.prev
+                if link then
+                    next = link.nextSub
+                    break  -- continue top; (go to next iteration)
                 end
             end
-        end
-    end
+
+            if not link then
+                return  -- break; (exit main loop)
+            end
+        until true
+    until false
 end
 
 -- Begins dependency tracking for a subscriber
@@ -653,7 +669,7 @@ end
 function reactive.startTracking(sub)
     -- Increment global version counter for this tracking cycle
     -- 为此跟踪周期递增全局版本计数器
-    g_version = g_version + 1
+    g_currentVersion = g_currentVersion + 1
 
     -- Reset dependency tail to collect dependencies from scratch
     sub.depsTail = nil
@@ -839,22 +855,15 @@ function reactive.shallowPropagate(link)
 end
 
 function reactive.isValidLink(checkLink, sub)
-    local depsTail = sub.depsTail
-    if depsTail then
-        local link = sub.deps
-        repeat
-            if link == checkLink then
-                return true
-            end
-
-            if link == depsTail then
-                break
-            end
-
-            link = link.depsTail
-        until not link
+    -- Simplified implementation: traverse backwards from depsTail (matching TypeScript v2.0.7)
+    -- 简化实现：从depsTail向前遍历（匹配TypeScript v2.0.7）
+    local link = sub.depsTail
+    while link do
+        if link == checkLink then
+            return true
+        end
+        link = link.prevDep
     end
-
     return false
 end
 
