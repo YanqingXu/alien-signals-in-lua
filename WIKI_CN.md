@@ -1,15 +1,19 @@
 # Alien Signals Lua 实现 - 深度技术解析
 
+**版本: 2.0.7** - 兼容 alien-signals v2.0.7
+
 ## 目录
 
 1. [架构设计原理](#架构设计原理)
-2. [核心数据结构](#核心数据结构)
-3. [依赖追踪算法](#依赖追踪算法)
-4. [更新传播机制](#更新传播机制)
-5. [内存管理策略](#内存管理策略)
-6. [性能优化技术](#性能优化技术)
-7. [算法复杂度分析](#算法复杂度分析)
-8. [与其他响应式系统对比](#与其他响应式系统对比)
+2. [核心 API 概览](#核心-api-概览)
+3. [核心数据结构](#核心数据结构)
+4. [依赖追踪算法](#依赖追踪算法)
+5. [更新传播机制](#更新传播机制)
+6. [内存管理策略](#内存管理策略)
+7. [性能优化技术](#性能优化技术)
+8. [算法复杂度分析](#算法复杂度分析)
+9. [HybridReactive API 系统](#hybridreactive-api-系统)
+10. [与其他响应式系统对比](#与其他响应式系统对比)
 
 ## 架构设计原理
 
@@ -19,9 +23,10 @@ Alien Signals 采用了基于**推拉混合模型**的响应式架构：
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    响应式系统架构                              │
+│                    响应式系统架构                            │
 ├─────────────────────────────────────────────────────────────┤
-│  应用层 │ Signal │ Computed │ Effect │ EffectScope          │
+│  应用层 │ Signal │ Computed │ Effect │ EffectScope           │
+│         │ HybridReactive (Vue.js 风格 API)                   │
 ├─────────────────────────────────────────────────────────────┤
 │  调度层 │ 批量更新 │ 队列管理 │ 脏值检查 │ 循环依赖检测        │
 ├─────────────────────────────────────────────────────────────┤
@@ -35,6 +40,58 @@ Alien Signals 采用了基于**推拉混合模型**的响应式架构：
 2. **最小化重新计算**: 只有真正需要时才重新计算
 3. **内存效率**: 自动清理不再使用的依赖关系
 4. **性能优先**: 使用位运算和链表优化关键路径
+5. **双重 API 设计**: 提供底层响应式原语和高级 Vue.js 风格 API
+
+## 核心 API 概览
+
+### 底层响应式系统 (reactive.lua)
+
+核心响应式系统提供基础原语：
+
+```lua
+local reactive = require("reactive")
+
+-- 核心响应式原语
+local signal = reactive.signal           -- 创建响应式信号
+local computed = reactive.computed       -- 创建计算值
+local effect = reactive.effect           -- 创建响应式副作用
+local effectScope = reactive.effectScope -- 创建副作用作用域
+
+-- 批量处理 API
+local startBatch = reactive.startBatch   -- 开始批量更新
+local endBatch = reactive.endBatch       -- 结束批量更新并刷新
+
+-- 高级控制 API
+local setCurrentSub = reactive.setCurrentSub     -- 设置当前订阅者
+local pauseTracking = reactive.pauseTracking     -- 暂停依赖追踪
+local resumeTracking = reactive.resumeTracking   -- 恢复依赖追踪
+```
+
+### 高级 HybridReactive API (HybridReactive.lua)
+
+Vue.js 风格的响应式编程接口：
+
+```lua
+local HybridReactive = require("HybridReactive")
+
+-- 响应式数据创建
+local ref = HybridReactive.ref           -- 创建响应式引用
+local reactive = HybridReactive.reactive -- 创建响应式对象
+local computed = HybridReactive.computed -- 创建计算属性
+
+-- 监听 API
+local watch = HybridReactive.watch             -- 通用监听函数（effect 的别名）
+local watchRef = HybridReactive.watchRef       -- 专门监听 ref 对象
+local watchReactive = HybridReactive.watchReactive -- 专门监听响应式对象
+
+-- 工具函数
+local isRef = HybridReactive.isRef           -- 检查是否为 ref 对象
+local isReactive = HybridReactive.isReactive -- 检查是否为响应式对象
+
+-- 批量操作（从 reactive 模块暴露）
+local startBatch = HybridReactive.startBatch -- 开始批量更新
+local endBatch = HybridReactive.endBatch     -- 结束批量更新
+```
 
 ## 核心数据结构
 
@@ -111,6 +168,27 @@ local ReactiveFlags = {
 
 local EffectFlags = {
     Queued = 64,        -- 1000000: 已加入执行队列
+}
+```
+
+### 4. 支持版本的链接节点结构
+
+双向链表的核心包含用于去重的版本追踪：
+
+```lua
+-- Link 结构 (v2.0.7)
+{
+    version = number,      -- 用于去重的版本号
+    dep = ReactiveObject,  -- 依赖对象（被依赖的对象）
+    sub = ReactiveObject,  -- 订阅者对象（依赖其他对象的对象）
+
+    -- 订阅者链表指针（垂直方向）
+    prevSub = Link,       -- 同一依赖的上一个订阅者
+    nextSub = Link,       -- 同一依赖的下一个订阅者
+
+    -- 依赖链表指针（水平方向）
+    prevDep = Link,       -- 同一订阅者的上一个依赖
+    nextDep = Link        -- 同一订阅者的下一个依赖
 }
 ```
 
@@ -442,16 +520,19 @@ end
 | 更新策略 | 推拉混合 | 推模式 |
 | 内存管理 | 自动清理 | 垃圾回收依赖 |
 | 性能 | 极高（位运算优化） | 高 |
+| API 风格 | 双重（底层 + Vue 风格） | Vue 专用 |
+| 版本去重 | 内置（v2.0.7） | 手动优化 |
 
 ### 与 MobX 对比
 
 | 特性 | Alien Signals | MobX |
 |------|---------------|------|
-| API 设计 | 函数式 | 面向对象 |
+| API 设计 | 函数式 + 面向对象 | 面向对象 |
 | 依赖收集 | 编译时 + 运行时 | 运行时 |
 | 状态管理 | 位运算标记 | 对象属性 |
 | 批量更新 | 内置支持 | 需要额外配置 |
-| 学习曲线 | 平缓 | 较陡峭 |
+| 学习曲线 | 平缓（双重 API） | 较陡峭 |
+| Ref 系统 | 内置 ref() API | 无直接等价物 |
 
 ### 与 Solid.js 对比
 
@@ -462,6 +543,15 @@ end
 | 内存占用 | 极低 | 低 |
 | 跨平台性 | 优秀（Lua） | 良好（JS） |
 | 生态系统 | 新兴 | 成熟 |
+| 监听 API | 多个专用 API | 单一 createEffect |
+
+### Alien Signals 的独特优势
+
+1. **双重 API 设计**: 提供底层原语和高级 Vue.js 风格 API
+2. **基于版本的去重**: 使用版本计数器进行高级链接去重（v2.0.7）
+3. **专用监听 API**: `watchRef()` 和 `watchReactive()` 针对类型的优化
+4. **跨语言可移植性**: Lua 实现支持游戏引擎和嵌入式系统
+5. **内存效率**: 位运算和双向链表最小化内存占用
 
 ## 技术创新点
 
@@ -486,7 +576,39 @@ end
 - 拉模式：惰性计算，避免不必要的计算
 - 智能调度：根据访问模式自动优化
 
-### 4. 自适应批量更新
+### 4. 基于版本的链接去重（v2.0.7）
+
+使用全局版本计数器的高级优化：
+- 防止同一追踪周期内的重复依赖链接
+- 避免冗余订阅，提升性能
+- 实现高效的循环依赖检测
+
+```lua
+-- 全局版本追踪
+local g_currentVersion = 0
+
+function reactive.link(dep, sub)
+    g_currentVersion = g_currentVersion + 1
+
+    -- 检查当前周期是否已链接
+    if prevDep and prevDep.version == g_currentVersion then
+        return  -- 跳过重复链接
+    end
+
+    -- 创建带有当前版本的新链接
+    local newLink = reactive.createLink(dep, sub, prevDep, nextDep, prevSub, nextSub)
+    newLink.version = g_currentVersion
+end
+```
+
+### 5. 双重 API 架构
+
+在不影响性能的情况下提供底层和高级 API：
+- 核心响应式系统：最大性能和灵活性
+- HybridReactive 层：开发者友好的 Vue.js 风格 API
+- 零开销抽象：高级 API 编译为核心原语
+
+### 6. 自适应批量更新
 
 根据更新频率自动调整批量策略：
 - 高频更新：自动启用批量模式
@@ -494,6 +616,140 @@ end
 - 混合场景：智能切换
 
 这些技术创新使得 Alien Signals 在保持简洁 API 的同时，实现了极高的性能和内存效率。
+
+## HybridReactive API 系统
+
+### 概述
+
+HybridReactive 模块基于核心 alien-signals 系统提供 Vue.js 风格的响应式编程接口。它为来自 Vue.js 的开发者提供熟悉的 API，同时保持底层系统的性能优势。
+
+### 核心 API
+
+#### 1. ref() - 响应式引用
+
+创建包装值的响应式引用，具有 `.value` 属性：
+
+```lua
+local HybridReactive = require("HybridReactive")
+
+-- 创建响应式引用
+local count = HybridReactive.ref(0)
+local name = HybridReactive.ref("Alice")
+
+-- 访问和修改值
+print(count.value)  -- 0
+count.value = 10
+print(count.value)  -- 10
+
+-- 检查是否为 ref
+print(HybridReactive.isRef(count))  -- true
+```
+
+#### 2. reactive() - 响应式对象
+
+为对象创建响应式代理，支持浅层和深层响应式：
+
+```lua
+-- 深层响应式（默认）
+local state = HybridReactive.reactive({
+    user = {
+        name = "Alice",
+        age = 25
+    },
+    items = {1, 2, 3}
+})
+
+-- 浅层响应式
+local shallowState = HybridReactive.reactive({
+    user = {name = "Bob"},
+    count = 0
+}, true)  -- shallow = true
+
+-- 检查是否为响应式对象
+print(HybridReactive.isReactive(state))  -- true
+```
+
+#### 3. computed() - 计算属性
+
+创建在依赖变化时自动更新的计算值：
+
+```lua
+local count = HybridReactive.ref(0)
+local doubled = HybridReactive.computed(function()
+    return count.value * 2
+end)
+
+print(doubled.value)  -- 0
+count.value = 5
+print(doubled.value)  -- 10
+```
+
+#### 4. 监听 API
+
+##### watchRef() - 监听 Ref 对象
+
+```lua
+local count = HybridReactive.ref(0)
+
+local stopWatching = HybridReactive.watchRef(count, function(newValue, oldValue)
+    print("计数从", oldValue, "变为", newValue)
+end)
+
+count.value = 1  -- 输出: 计数从 0 变为 1
+stopWatching()   -- 停止监听
+```
+
+##### watchReactive() - 监听响应式对象
+
+```lua
+local state = HybridReactive.reactive({
+    name = "Alice",
+    age = 25
+})
+
+-- 监听所有属性（默认深层监听）
+local stopWatching = HybridReactive.watchReactive(state, function(key, newValue, oldValue)
+    print("属性", key, "从", oldValue, "变为", newValue)
+end)
+
+state.name = "Bob"  -- 输出: 属性 name 从 Alice 变为 Bob
+
+-- 浅层监听
+local stopShallowWatch = HybridReactive.watchReactive(state, function(key, newValue, oldValue)
+    print("浅层变化:", key, newValue)
+end, true)  -- shallow = true
+```
+
+### 与核心系统的集成
+
+HybridReactive API 基于核心响应式系统构建，提供无缝集成：
+
+```lua
+-- 混合使用 HybridReactive 和核心 API
+local reactive = require("reactive")
+local HybridReactive = require("HybridReactive")
+
+local count = HybridReactive.ref(0)
+local doubled = reactive.computed(function()
+    return count.value * 2  -- 无缝工作
+end)
+
+reactive.effect(function()
+    print("副作用:", doubled())
+end)
+
+-- 批量更新在两个 API 间都有效
+HybridReactive.startBatch()
+count.value = 5
+reactive.endBatch()
+```
+
+### 性能特征
+
+- **ref()**: O(1) 访问和修改，最小内存开销
+- **reactive()**: O(1) 属性访问，O(n) 对象创建（n 为属性数量）
+- **computed()**: 与核心计算值相同的性能
+- **监听 API**: O(1) 设置，高效的变化检测
 
 ---
 

@@ -1,5 +1,7 @@
 # Alien Signals - Lua响应式编程系统
 
+**版本: 2.0.7** - 兼容 alien-signals v2.0.7
+
 [English README](README.en.md)
 
 ## 项目简介
@@ -7,6 +9,13 @@
 本项目移植自[stackblitz/alien-signals](https://github.com/stackblitz/alien-signals)，是原TypeScript版本响应式系统的Lua实现。
 
 Alien Signals是一个高效的响应式编程系统，它通过简洁而强大的API，为应用提供自动依赖追踪和响应式数据流管理能力。
+
+### 2.0.7 版本新特性
+
+- **版本去重机制**: 使用全局版本计数器优化依赖链接，防止同一追踪周期内的重复链接
+- **增强的 HybridReactive API**: 完善的 Vue.js 风格响应式编程接口
+- **性能优化**: 改进的循环依赖检测和链接管理算法
+- **兼容性**: 与 alien-signals v2.0.7 完全兼容
 
 ## 核心概念
 
@@ -746,24 +755,28 @@ Signal A ---> Effect 1 ---> Signal B ---> Effect 2
 
 ## 完整API参考
 
-### 底层响应式系统 (reactive.lua)
+### 底层响应式系统 (reactive.lua) - v2.0.7
 
 ```lua
 local reactive = require("reactive")
 
--- 核心API
-local signal = reactive.signal       -- 创建响应式信号
-local computed = reactive.computed   -- 创建计算属性  
-local effect = reactive.effect       -- 创建副作用
-local effectScope = reactive.effectScope  -- 创建副作用作用域
+-- 核心响应式原语
+local signal = reactive.signal           -- 创建响应式信号
+local computed = reactive.computed       -- 创建计算值
+local effect = reactive.effect           -- 创建响应式副作用
+local effectScope = reactive.effectScope -- 创建副作用作用域
 
--- 批量处理API
-local startBatch = reactive.startBatch  -- 开始批量更新
-local endBatch = reactive.endBatch      -- 结束批量更新并执行更新
-local flush = reactive.flush            -- 立即执行所有待处理的副作用
+-- 批量操作工具
+local startBatch = reactive.startBatch   -- 开始批量更新
+local endBatch = reactive.endBatch       -- 结束批量更新并刷新
+
+-- 高级控制 API (v2.0.7)
+local setCurrentSub = reactive.setCurrentSub     -- 设置当前订阅者
+local pauseTracking = reactive.pauseTracking     -- 暂停依赖追踪
+local resumeTracking = reactive.resumeTracking   -- 恢复依赖追踪
 ```
 
-### HybridReactive - Vue.js风格API
+### HybridReactive - Vue.js风格API (v2.0.7)
 
 ```lua
 local HybridReactive = require("HybridReactive")
@@ -773,20 +786,53 @@ local ref = HybridReactive.ref           -- 创建响应式引用
 local reactive = HybridReactive.reactive -- 创建响应式对象
 local computed = HybridReactive.computed -- 创建计算属性
 
--- 监听API
-local watch = HybridReactive.watch             -- 通用监听函数
-local watchRef = HybridReactive.watchRef       -- 专门监听ref对象
-local watchReactive = HybridReactive.watchReactive -- 专门监听reactive对象
+-- 监听 API
+local watch = HybridReactive.watch             -- 通用监听函数（effect 的别名）
+local watchRef = HybridReactive.watchRef       -- 专门监听 ref 对象
+local watchReactive = HybridReactive.watchReactive -- 专门监听响应式对象
 
 -- 工具函数
-local isRef = HybridReactive.isRef           -- 检查是否为ref对象
+local isRef = HybridReactive.isRef           -- 检查是否为 ref 对象
 local isReactive = HybridReactive.isReactive -- 检查是否为响应式对象
 
--- 底层API（从reactive模块暴露）
-local effect = HybridReactive.effect         -- 创建副作用
+-- 批量操作（从 reactive 模块暴露）
 local startBatch = HybridReactive.startBatch -- 开始批量更新
 local endBatch = HybridReactive.endBatch     -- 结束批量更新
-local flush = HybridReactive.flush           -- 立即执行副作用
+```
+
+### v2.0.7 版本技术特性
+
+#### 版本去重机制
+```lua
+-- 全局版本追踪防止重复链接
+local g_currentVersion = 0
+
+function reactive.link(dep, sub)
+    g_currentVersion = g_currentVersion + 1
+
+    -- 检查当前周期是否已链接
+    if prevDep and prevDep.version == g_currentVersion then
+        return  -- 跳过重复链接
+    end
+
+    -- 创建带有当前版本的新链接
+    local newLink = reactive.createLink(dep, sub, prevDep, nextDep, prevSub, nextSub)
+    newLink.version = g_currentVersion
+end
+```
+
+#### 增强的链接节点结构
+```lua
+-- Link 结构 (v2.0.7)
+{
+    version = number,      -- 用于去重的版本号
+    dep = ReactiveObject,  -- 依赖对象
+    sub = ReactiveObject,  -- 订阅者对象
+    prevSub = Link,        -- 订阅者链表指针
+    nextSub = Link,        -- 订阅者链表指针
+    prevDep = Link,        -- 依赖链表指针
+    nextDep = Link         -- 依赖链表指针
+}
 ```
 
 ## HybridReactive 特性总结

@@ -1,5 +1,7 @@
 # Alien Signals - Lua Reactive Programming System
 
+**Version: 2.0.7** - Compatible with alien-signals v2.0.7
+
 [简体中文 README](README.md)
 
 ## Introduction
@@ -7,6 +9,13 @@
 This project is ported from [stackblitz/alien-signals](https://github.com/stackblitz/alien-signals), and is a Lua implementation of the original TypeScript reactive system.
 
 Alien Signals is an efficient reactive programming system. It provides automatic dependency tracking and reactive data flow management capabilities for applications through a clean and powerful API.
+
+### New Features in v2.0.7
+
+- **Version-based Link Deduplication**: Uses global version counters to optimize dependency linking, preventing duplicate links within the same tracking cycle
+- **Enhanced HybridReactive API**: Complete Vue.js-style reactive programming interface
+- **Performance Optimizations**: Improved circular dependency detection and link management algorithms
+- **Compatibility**: Fully compatible with alien-signals v2.0.7
 
 ## Core Concepts
 
@@ -622,47 +631,84 @@ SECTION 2: Path Tracking and Same Key Tests
 
 ## Complete API Reference
 
-### Low-level Reactive System (reactive.lua)
+### Low-level Reactive System (reactive.lua) - v2.0.7
 
 ```lua
 local reactive = require("reactive")
 
--- Core APIs
-local signal = reactive.signal       -- Create reactive signal
-local computed = reactive.computed   -- Create computed property
-local effect = reactive.effect       -- Create effect
-local effectScope = reactive.effectScope  -- Create effect scope
+-- Core reactive primitives
+local signal = reactive.signal           -- Create reactive signals
+local computed = reactive.computed       -- Create computed values
+local effect = reactive.effect           -- Create reactive effects
+local effectScope = reactive.effectScope -- Create effect scopes
 
--- Batch processing APIs
-local startBatch = reactive.startBatch  -- Start batch updates
-local endBatch = reactive.endBatch      -- End batch updates and execute
-local flush = reactive.flush            -- Immediately execute all pending effects
+-- Batch operation utilities
+local startBatch = reactive.startBatch   -- Start batch updates
+local endBatch = reactive.endBatch       -- End batch updates and flush
+
+-- Advanced control API (v2.0.7)
+local setCurrentSub = reactive.setCurrentSub     -- Set current subscriber
+local pauseTracking = reactive.pauseTracking     -- Pause dependency tracking
+local resumeTracking = reactive.resumeTracking   -- Resume dependency tracking
 ```
 
-### HybridReactive - Vue.js Style API
+### HybridReactive - Vue.js Style API (v2.0.7)
 
 ```lua
 local HybridReactive = require("HybridReactive")
 
 -- Reactive data creation
-local ref = HybridReactive.ref           -- Create reactive reference
-local reactive = HybridReactive.reactive -- Create reactive object
-local computed = HybridReactive.computed -- Create computed property
+local ref = HybridReactive.ref           -- Create reactive references
+local reactive = HybridReactive.reactive -- Create reactive objects
+local computed = HybridReactive.computed -- Create computed properties
 
--- Watching APIs
-local watch = HybridReactive.watch             -- General watch function
+-- Watch API
+local watch = HybridReactive.watch             -- Generic watch function (alias for effect)
 local watchRef = HybridReactive.watchRef       -- Watch ref objects specifically
 local watchReactive = HybridReactive.watchReactive -- Watch reactive objects specifically
 
 -- Utility functions
-local isRef = HybridReactive.isRef           -- Check if value is ref object
-local isReactive = HybridReactive.isReactive -- Check if value is reactive object
+local isRef = HybridReactive.isRef           -- Check if value is a ref object
+local isReactive = HybridReactive.isReactive -- Check if value is a reactive object
 
--- Low-level APIs (exposed from reactive module)
-local effect = HybridReactive.effect         -- Create effect
+-- Batch operations (exposed from reactive module)
 local startBatch = HybridReactive.startBatch -- Start batch updates
 local endBatch = HybridReactive.endBatch     -- End batch updates
-local flush = HybridReactive.flush           -- Immediately execute effects
+```
+
+### v2.0.7 Technical Features
+
+#### Version-based Link Deduplication
+```lua
+-- Global version tracking prevents duplicate links
+local g_currentVersion = 0
+
+function reactive.link(dep, sub)
+    g_currentVersion = g_currentVersion + 1
+
+    -- Check if already linked in current cycle
+    if prevDep and prevDep.version == g_currentVersion then
+        return  -- Skip duplicate link
+    end
+
+    -- Create new link with current version
+    local newLink = reactive.createLink(dep, sub, prevDep, nextDep, prevSub, nextSub)
+    newLink.version = g_currentVersion
+end
+```
+
+#### Enhanced Link Node Structure
+```lua
+-- Link Structure (v2.0.7)
+{
+    version = number,      -- Version number for deduplication
+    dep = ReactiveObject,  -- Dependency object
+    sub = ReactiveObject,  -- Subscriber object
+    prevSub = Link,        -- Subscriber linked list pointers
+    nextSub = Link,        -- Subscriber linked list pointers
+    prevDep = Link,        -- Dependency linked list pointers
+    nextDep = Link         -- Dependency linked list pointers
+}
 ```
 
 ## HybridReactive Feature Summary
@@ -671,6 +717,17 @@ local flush = HybridReactive.flush           -- Immediately execute effects
 
 1. **Vue.js Style API**: Provides familiar `ref`, `reactive`, `computed` APIs
 2. **Deep Reactivity**: Default support for deep nested object reactive conversion
+3. **Precise Monitoring**: `watchReactive` provides precise property change monitoring and path tracking
+4. **High Performance**: Based on efficient doubly-linked list dependency management system
+5. **Type Safety**: Strict type checking and error handling
+6. **Memory Safety**: Automatic cleanup of unused dependency relationships
+
+### v2.0.7 Enhancements
+
+- **Version-based Deduplication**: Advanced link deduplication using version counters
+- **Specialized Watch APIs**: `watchRef()` and `watchReactive()` for type-specific optimizations
+- **Cross-Language Portability**: Lua implementation enables usage in game engines and embedded systems
+- **Dual API Architecture**: Provides both low-level primitives and high-level Vue.js-style APIs
 3. **Precise Watching**: `watchReactive` provides precise property change watching and path tracking
 4. **High Performance**: Based on efficient doubly-linked list dependency management system
 5. **Type Safety**: Strict type checking and error handling

@@ -1,15 +1,19 @@
 # Alien Signals Lua Implementation - In-Depth Technical Analysis
 
+**Version: 2.0.7** - Compatible with alien-signals v2.0.7
+
 ## Table of Contents
 
 1. [Architecture Design Principles](#architecture-design-principles)
-2. [Core Data Structures](#core-data-structures)
-3. [Dependency Tracking Algorithm](#dependency-tracking-algorithm)
-4. [Update Propagation Mechanism](#update-propagation-mechanism)
-5. [Memory Management Strategy](#memory-management-strategy)
-6. [Performance Optimization Techniques](#performance-optimization-techniques)
-7. [Algorithm Complexity Analysis](#algorithm-complexity-analysis)
-8. [Comparison with Other Reactive Systems](#comparison-with-other-reactive-systems)
+2. [Core API Overview](#core-api-overview)
+3. [Core Data Structures](#core-data-structures)
+4. [Dependency Tracking Algorithm](#dependency-tracking-algorithm)
+5. [Update Propagation Mechanism](#update-propagation-mechanism)
+6. [Memory Management Strategy](#memory-management-strategy)
+7. [Performance Optimization Techniques](#performance-optimization-techniques)
+8. [Algorithm Complexity Analysis](#algorithm-complexity-analysis)
+9. [HybridReactive API System](#hybridreactive-api-system)
+10. [Comparison with Other Reactive Systems](#comparison-with-other-reactive-systems)
 
 ## Architecture Design Principles
 
@@ -18,15 +22,16 @@
 Alien Signals adopts a reactive architecture based on a **push-pull hybrid model**:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Reactive System Architecture               │
-├─────────────────────────────────────────────────────────────┤
-│  App Layer │ Signal │ Computed │ Effect │ EffectScope        │
-├─────────────────────────────────────────────────────────────┤
-│  Sched Layer │ Batch Updates │ Queue Mgmt │ Dirty Check │ Cycle Detection │
-├─────────────────────────────────────────────────────────────┤
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                    Reactive System Architecture                                        │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│  App Layer │ Signal │ Computed │ Effect │ EffectScope                                  │
+│            │ HybridReactive (Vue.js-style API)                                         │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│  Sched Layer │ Batch Updates │ Queue Mgmt │ Dirty Check │ Cycle Detection              │
+├────────────────────────────────────────────────────────────────────────────────────────┤
 │  Storage Layer │ Doubly Linked Lists │ Bitwise Flags │ Global State │ Dependency Graph │
-└─────────────────────────────────────────────────────────────┘
+└────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Design Philosophy
@@ -35,6 +40,58 @@ Alien Signals adopts a reactive architecture based on a **push-pull hybrid model
 2. **Minimize Recomputation**: Only recompute when truly necessary
 3. **Memory Efficiency**: Automatically clean up unused dependency relationships
 4. **Performance First**: Use bitwise operations and linked lists to optimize critical paths
+5. **Dual API Design**: Provide both low-level reactive primitives and high-level Vue.js-style API
+
+## Core API Overview
+
+### Low-Level Reactive System (reactive.lua)
+
+The core reactive system provides fundamental primitives:
+
+```lua
+local reactive = require("reactive")
+
+-- Core reactive primitives
+local signal = reactive.signal           -- Create reactive signals
+local computed = reactive.computed       -- Create computed values
+local effect = reactive.effect           -- Create reactive effects
+local effectScope = reactive.effectScope -- Create effect scopes
+
+-- Batch processing API
+local startBatch = reactive.startBatch   -- Start batch updates
+local endBatch = reactive.endBatch       -- End batch updates and flush
+
+-- Advanced control API
+local setCurrentSub = reactive.setCurrentSub     -- Set current subscriber
+local pauseTracking = reactive.pauseTracking     -- Pause dependency tracking
+local resumeTracking = reactive.resumeTracking   -- Resume dependency tracking
+```
+
+### High-Level HybridReactive API (HybridReactive.lua)
+
+Vue.js-style reactive programming interface:
+
+```lua
+local HybridReactive = require("HybridReactive")
+
+-- Reactive data creation
+local ref = HybridReactive.ref           -- Create reactive references
+local reactive = HybridReactive.reactive -- Create reactive objects
+local computed = HybridReactive.computed -- Create computed properties
+
+-- Watch API
+local watch = HybridReactive.watch             -- Generic watch function (alias for effect)
+local watchRef = HybridReactive.watchRef       -- Watch ref objects specifically
+local watchReactive = HybridReactive.watchReactive -- Watch reactive objects specifically
+
+-- Utility functions
+local isRef = HybridReactive.isRef           -- Check if value is a ref object
+local isReactive = HybridReactive.isReactive -- Check if value is a reactive object
+
+-- Batch operations (exposed from reactive module)
+local startBatch = HybridReactive.startBatch -- Start batch updates
+local endBatch = HybridReactive.endBatch     -- End batch updates
+```
 
 ## Core Data Structures
 
@@ -111,6 +168,27 @@ local ReactiveFlags = {
 
 local EffectFlags = {
     Queued = 64,        -- 1000000: Added to execution queue
+}
+```
+
+### 4. Link Node Structure with Version Support
+
+The core of the doubly linked list includes version tracking for deduplication:
+
+```lua
+-- Link Structure (v2.0.7)
+{
+    version = number,      -- Version number for deduplication
+    dep = ReactiveObject,  -- Dependency object (the object being depended on)
+    sub = ReactiveObject,  -- Subscriber object (the object depending on others)
+
+    -- Subscriber linked list pointers (vertical direction)
+    prevSub = Link,       -- Previous subscriber of the same dependency
+    nextSub = Link,       -- Next subscriber of the same dependency
+
+    -- Dependency linked list pointers (horizontal direction)
+    prevDep = Link,       -- Previous dependency of the same subscriber
+    nextDep = Link        -- Next dependency of the same subscriber
 }
 ```
 
@@ -442,16 +520,19 @@ end
 | Update Strategy | Push-pull hybrid | Push mode |
 | Memory Management | Automatic cleanup | Garbage collection dependent |
 | Performance | Extremely high (bitwise optimized) | High |
+| API Style | Dual (Low-level + Vue-like) | Vue-specific |
+| Version Deduplication | Built-in (v2.0.7) | Manual optimization |
 
 ### Comparison with MobX
 
 | Feature | Alien Signals | MobX |
 |---------|---------------|------|
-| API Design | Functional | Object-oriented |
+| API Design | Functional + Object-oriented | Object-oriented |
 | Dependency Collection | Compile-time + Runtime | Runtime |
 | State Management | Bitwise flags | Object properties |
 | Batch Updates | Built-in support | Requires additional configuration |
-| Learning Curve | Gentle | Steeper |
+| Learning Curve | Gentle (dual API) | Steeper |
+| Ref System | Built-in ref() API | No direct equivalent |
 
 ### Comparison with Solid.js
 
@@ -462,6 +543,15 @@ end
 | Memory Usage | Extremely low | Low |
 | Cross-platform | Excellent (Lua) | Good (JS) |
 | Ecosystem | Emerging | Mature |
+| Watch APIs | Multiple specialized APIs | Single createEffect |
+
+### Unique Advantages of Alien Signals
+
+1. **Dual API Design**: Provides both low-level primitives and high-level Vue.js-style APIs
+2. **Version-based Deduplication**: Advanced link deduplication using version counters (v2.0.7)
+3. **Specialized Watch APIs**: `watchRef()` and `watchReactive()` for type-specific optimizations
+4. **Cross-Language Portability**: Lua implementation enables usage in game engines and embedded systems
+5. **Memory Efficiency**: Bitwise operations and doubly-linked lists minimize memory footprint
 
 ## Technical Innovations
 
@@ -486,7 +576,39 @@ Combines the advantages of both push and pull models:
 - Pull mode: Lazy computation, avoiding unnecessary calculations
 - Smart scheduling: Automatic optimization based on access patterns
 
-### 4. Adaptive Batch Updates
+### 4. Version-based Link Deduplication (v2.0.7)
+
+Advanced optimization using global version counters:
+- Prevents duplicate dependency links within the same tracking cycle
+- Improves performance by avoiding redundant subscriptions
+- Enables efficient circular dependency detection
+
+```lua
+-- Global version tracking
+local g_currentVersion = 0
+
+function reactive.link(dep, sub)
+    g_currentVersion = g_currentVersion + 1
+
+    -- Check if already linked in current cycle
+    if prevDep and prevDep.version == g_currentVersion then
+        return  -- Skip duplicate link
+    end
+
+    -- Create new link with current version
+    local newLink = reactive.createLink(dep, sub, prevDep, nextDep, prevSub, nextSub)
+    newLink.version = g_currentVersion
+end
+```
+
+### 5. Dual API Architecture
+
+Provides both low-level and high-level APIs without performance compromise:
+- Core reactive system: Maximum performance and flexibility
+- HybridReactive layer: Developer-friendly Vue.js-style APIs
+- Zero-overhead abstraction: High-level APIs compile to core primitives
+
+### 6. Adaptive Batch Updates
 
 Automatically adjusts batch strategy based on update frequency:
 - High-frequency updates: Automatically enable batch mode
@@ -494,6 +616,140 @@ Automatically adjusts batch strategy based on update frequency:
 - Mixed scenarios: Smart switching
 
 These technical innovations enable Alien Signals to achieve extremely high performance and memory efficiency while maintaining a simple API.
+
+## HybridReactive API System
+
+### Overview
+
+The HybridReactive module provides a Vue.js-style reactive programming interface built on top of the core alien-signals system. It offers familiar APIs for developers coming from Vue.js while maintaining the performance benefits of the underlying system.
+
+### Core APIs
+
+#### 1. ref() - Reactive References
+
+Creates a reactive reference that wraps a value with a `.value` property:
+
+```lua
+local HybridReactive = require("HybridReactive")
+
+-- Create reactive reference
+local count = HybridReactive.ref(0)
+local name = HybridReactive.ref("Alice")
+
+-- Access and modify values
+print(count.value)  -- 0
+count.value = 10
+print(count.value)  -- 10
+
+-- Check if value is a ref
+print(HybridReactive.isRef(count))  -- true
+```
+
+#### 2. reactive() - Reactive Objects
+
+Creates a reactive proxy for objects with support for shallow and deep reactivity:
+
+```lua
+-- Deep reactive (default)
+local state = HybridReactive.reactive({
+    user = {
+        name = "Alice",
+        age = 25
+    },
+    items = {1, 2, 3}
+})
+
+-- Shallow reactive
+local shallowState = HybridReactive.reactive({
+    user = {name = "Bob"},
+    count = 0
+}, true)  -- shallow = true
+
+-- Check if value is reactive
+print(HybridReactive.isReactive(state))  -- true
+```
+
+#### 3. computed() - Computed Properties
+
+Creates computed values that automatically update when dependencies change:
+
+```lua
+local count = HybridReactive.ref(0)
+local doubled = HybridReactive.computed(function()
+    return count.value * 2
+end)
+
+print(doubled.value)  -- 0
+count.value = 5
+print(doubled.value)  -- 10
+```
+
+#### 4. Watch APIs
+
+##### watchRef() - Watch Ref Objects
+
+```lua
+local count = HybridReactive.ref(0)
+
+local stopWatching = HybridReactive.watchRef(count, function(newValue, oldValue)
+    print("Count changed from", oldValue, "to", newValue)
+end)
+
+count.value = 1  -- Output: Count changed from 0 to 1
+stopWatching()   -- Stop watching
+```
+
+##### watchReactive() - Watch Reactive Objects
+
+```lua
+local state = HybridReactive.reactive({
+    name = "Alice",
+    age = 25
+})
+
+-- Watch all properties (deep watching by default)
+local stopWatching = HybridReactive.watchReactive(state, function(key, newValue, oldValue)
+    print("Property", key, "changed from", oldValue, "to", newValue)
+end)
+
+state.name = "Bob"  -- Output: Property name changed from Alice to Bob
+
+-- Shallow watching
+local stopShallowWatch = HybridReactive.watchReactive(state, function(key, newValue, oldValue)
+    print("Shallow change:", key, newValue)
+end, true)  -- shallow = true
+```
+
+### Integration with Core System
+
+The HybridReactive APIs are built on top of the core reactive system and provide seamless integration:
+
+```lua
+-- Mix HybridReactive with core APIs
+local reactive = require("reactive")
+local HybridReactive = require("HybridReactive")
+
+local count = HybridReactive.ref(0)
+local doubled = reactive.computed(function()
+    return count.value * 2  -- Works seamlessly
+end)
+
+reactive.effect(function()
+    print("Effect:", doubled())
+end)
+
+-- Batch updates work across both APIs
+HybridReactive.startBatch()
+count.value = 5
+reactive.endBatch()
+```
+
+### Performance Characteristics
+
+- **ref()**: O(1) access and modification, minimal memory overhead
+- **reactive()**: O(1) property access, O(n) for object creation where n is number of properties
+- **computed()**: Same performance as core computed values
+- **watch APIs**: O(1) setup, efficient change detection
 
 ---
 
