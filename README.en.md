@@ -1,6 +1,6 @@
 # Alien Signals - Lua Reactive Programming System
 
-**Version: 2.0.7** - Compatible with alien-signals v2.0.7
+**Version: 3.0.0** - Compatible with alien-signals v3.0.0
 
 [简体中文 README](README.md)
 
@@ -10,12 +10,18 @@ This project is ported from [stackblitz/alien-signals](https://github.com/stackb
 
 Alien Signals is an efficient reactive programming system. It provides automatic dependency tracking and reactive data flow management capabilities for applications through a clean and powerful API.
 
-### New Features in v2.0.7
+### New Features in v3.0.0
 
-- **Version-based Link Deduplication**: Uses global version counters to optimize dependency linking, preventing duplicate links within the same tracking cycle
-- **Enhanced HybridReactive API**: Complete Vue.js-style reactive programming interface
-- **Performance Optimizations**: Improved circular dependency detection and link management algorithms
-- **Compatibility**: Fully compatible with alien-signals v2.0.7
+- **Type Detection Functions**: Added runtime type checking functions - `isSignal`, `isComputed`, `isEffect`, `isEffectScope`
+- **New Getters**: Added `getBatchDepth` and `getActiveSub` for querying reactive context state
+- **API Renames**: Renamed `setCurrentSub`→`setActiveSub`, `getCurrentSub`→`getActiveSub` for clearer semantics
+- **Removed Deprecated APIs**: Removed `pauseTracking`/`resumeTracking`, `setCurrentScope`/`getCurrentScope`
+- **Computed Optimization**: Removed initial Dirty flag, added fast path for first computation
+- **Internal Optimizations**: Removed `startTracking`/`endTracking`, inlined tracking logic for better performance
+- **Link Enhancement**: Added third parameter support to `link` function for more flexible dependency management
+- **Pending Flag Cleanup**: Inlined pending flag clearing logic for reduced function call overhead
+
+> ⚠️ **Breaking Changes**: This is a major version update. Please refer to [UPGRADE_TO_3.0.0.md](UPGRADE_TO_3.0.0.md) for migration guide.
 
 ## Core Concepts
 
@@ -367,7 +373,93 @@ multiplier(3)
 endBatch() -- Output: Result: 30
 ```
 
-## Implementation Details
+### v3.0.0 New Features
+
+#### Type Detection Functions
+
+v3.0.0 added runtime type detection functions to check if a value is a specific reactive primitive:
+
+```lua
+local reactive = require("reactive")
+local signal = reactive.signal
+local computed = reactive.computed
+local effect = reactive.effect
+local effectScope = reactive.effectScope
+
+-- Create reactive primitives
+local count = signal(0)
+local doubled = computed(function() return count() * 2 end)
+local stopEffect = effect(function() print(count()) end)
+local stopScope = effectScope(function() end)
+
+-- Type detection
+print(reactive.isSignal(count))        -- true
+print(reactive.isSignal(doubled))      -- false
+
+print(reactive.isComputed(doubled))    -- true
+print(reactive.isComputed(count))      -- false
+
+print(reactive.isEffect(stopEffect))   -- true
+print(reactive.isEffectScope(stopScope)) -- true
+```
+
+#### Querying Reactive Context State
+
+v3.0.0 added functions to query the current reactive context:
+
+```lua
+local reactive = require("reactive")
+local signal = reactive.signal
+local effect = reactive.effect
+
+-- Get batch update depth
+print(reactive.getBatchDepth())  -- 0
+
+reactive.startBatch()
+print(reactive.getBatchDepth())  -- 1
+
+reactive.startBatch()
+print(reactive.getBatchDepth())  -- 2
+
+reactive.endBatch()
+print(reactive.getBatchDepth())  -- 1
+
+reactive.endBatch()
+print(reactive.getBatchDepth())  -- 0
+
+-- Get current active subscriber
+local count = signal(0)
+print(reactive.getActiveSub() == nil)  -- true
+
+effect(function()
+    count()
+    -- Inside effect, getActiveSub returns current effect
+    local sub = reactive.getActiveSub()
+    print(sub ~= nil)  -- true
+end)
+
+-- Outside effect
+print(reactive.getActiveSub() == nil)  -- true
+```
+
+#### API Renames
+
+For clearer semantics, v3.0.0 renamed some APIs:
+
+```lua
+-- v2.0.7 (old API)
+local prevSub = reactive.setCurrentSub(nil)
+reactive.setCurrentSub(prevSub)
+
+-- v3.0.0 (new API)
+local prevSub = reactive.setActiveSub(nil)
+reactive.setActiveSub(prevSub)
+```
+
+> ⚠️ **Important**: `pauseTracking`/`resumeTracking` and `setCurrentScope`/`getCurrentScope` have been removed in v3.0.0.
+> To pause tracking, use `setActiveSub(nil)` instead.
+
+
 
 The system uses the following techniques to implement reactivity:
 
@@ -631,28 +723,39 @@ SECTION 2: Path Tracking and Same Key Tests
 
 ## Complete API Reference
 
-### Low-level Reactive System (reactive.lua) - v2.0.7
+### Low-level Reactive System (reactive.lua) - v3.0.0
 
 ```lua
 local reactive = require("reactive")
 
 -- Core reactive primitives
-local signal = reactive.signal           -- Create reactive signals
-local computed = reactive.computed       -- Create computed values
-local effect = reactive.effect           -- Create reactive effects
-local effectScope = reactive.effectScope -- Create effect scopes
+local signal = reactive.signal           -- Create reactive signal
+local computed = reactive.computed       -- Create computed value
+local effect = reactive.effect           -- Create reactive effect
+local effectScope = reactive.effectScope -- Create effect scope
 
 -- Batch operation utilities
 local startBatch = reactive.startBatch   -- Start batch updates
 local endBatch = reactive.endBatch       -- End batch updates and flush
 
--- Advanced control API (v2.0.7)
-local setCurrentSub = reactive.setCurrentSub     -- Set current subscriber
-local pauseTracking = reactive.pauseTracking     -- Pause dependency tracking
-local resumeTracking = reactive.resumeTracking   -- Resume dependency tracking
-```
+-- Advanced control API (v3.0.0)
+local setActiveSub = reactive.setActiveSub       -- Set current active subscriber (v3.0.0 renamed)
+local getActiveSub = reactive.getActiveSub       -- Get current active subscriber (v3.0.0 renamed)
+local getBatchDepth = reactive.getBatchDepth     -- Get batch update depth (v3.0.0 new)
 
-### HybridReactive - Vue.js Style API (v2.0.7)
+-- Type detection API (v3.0.0 new)
+local isSignal = reactive.isSignal               -- Check if value is Signal
+local isComputed = reactive.isComputed           -- Check if value is Computed
+local isEffect = reactive.isEffect               -- Check if value is Effect
+local isEffectScope = reactive.isEffectScope     -- Check if value is EffectScope
+
+-- Removed APIs (v3.0.0)
+-- ❌ pauseTracking - Use setActiveSub(nil) instead
+-- ❌ resumeTracking - Use setActiveSub(prevSub) instead
+-- ❌ setCurrentScope - Removed
+-- ❌ getCurrentScope - Removed
+
+### HybridReactive - Vue.js Style API (v3.0.0)
 
 ```lua
 local HybridReactive = require("HybridReactive")
@@ -676,40 +779,94 @@ local startBatch = HybridReactive.startBatch -- Start batch updates
 local endBatch = HybridReactive.endBatch     -- End batch updates
 ```
 
-### v2.0.7 Technical Features
+### v3.0.0 Technical Features
 
-#### Version-based Link Deduplication
+#### Type Marker System
 ```lua
--- Global version tracking prevents duplicate links
-local g_currentVersion = 0
+-- Unique type markers
+local SIGNAL_MARKER = {}
+local COMPUTED_MARKER = {}
+local EFFECT_MARKER = {}
+local EFFECTSCOPE_MARKER = {}
 
-function reactive.link(dep, sub)
-    g_currentVersion = g_currentVersion + 1
-
-    -- Check if already linked in current cycle
-    if prevDep and prevDep.version == g_currentVersion then
-        return  -- Skip duplicate link
+-- Type detection implementation
+function reactive.isSignal(obj)
+    if type(obj) ~= "function" then return false end
+    
+    -- Check marker in upvalue using debug library
+    local i = 1
+    while true do
+        local name, value = debug.getupvalue(obj, i)
+        if not name then break end
+        if name == "obj" then
+            return value._marker == SIGNAL_MARKER
+        end
+        i = i + 1
     end
-
-    -- Create new link with current version
-    local newLink = reactive.createLink(dep, sub, prevDep, nextDep, prevSub, nextSub)
-    newLink.version = g_currentVersion
+    return false
 end
 ```
 
-#### Enhanced Link Node Structure
+#### Optimized Computed Initialization
 ```lua
--- Link Structure (v2.0.7)
-{
-    version = number,      -- Version number for deduplication
-    dep = ReactiveObject,  -- Dependency object
-    sub = ReactiveObject,  -- Subscriber object
-    prevSub = Link,        -- Subscriber linked list pointers
-    nextSub = Link,        -- Subscriber linked list pointers
-    prevDep = Link,        -- Dependency linked list pointers
-    nextDep = Link         -- Dependency linked list pointers
-}
+-- v3.0.0: Removed Dirty flag, optimized first computation path
+function reactive.computed(getter)
+    local obj = {
+        _getter = getter,
+        _value = nil,
+        _flags = 0,  -- v3.0.0: Initialize to 0, no longer includes Dirty flag
+        _marker = COMPUTED_MARKER
+    }
+    
+    -- First access directly computes
+    return function()
+        if obj._flags == 0 then
+            -- Fast path: first computation
+            local success, result = pcall(updateComputed, obj)
+            if success then
+                return result
+            end
+        end
+        -- ...
+    end
+end
 ```
+
+#### Inlined Tracking Optimization
+```lua
+-- v3.0.0: Removed startTracking/endTracking, directly inlined tracking logic
+function run(obj)
+    -- Directly inline check and set
+    local shouldCleanup = obj._flags & RunningFlags ~= 0
+    if shouldCleanup then
+        obj._flags = obj._flags | NotifiedFlag
+    end
+    
+    if shouldCleanup then
+        purgeDeps(obj)
+    end
+    
+    -- Set active subscriber
+    local prevSub = g_activeSub
+    g_activeSub = obj
+    
+    -- Execute side effect
+    local status, err = pcall(obj._fn)
+    
+    -- Restore previous subscriber
+    g_activeSub = prevSub
+    
+    -- Clear flags
+    obj._flags = obj._flags & bit.bnot(RunningFlags | NotifiedFlag)
+end
+```
+
+
+## HybridReactive Feature Summary
+
+### Core Advantages
+
+1. **Vue.js Style API**: Provides familiar `ref`, `reactive`, `computed` APIs
 
 ## HybridReactive Feature Summary
 
@@ -717,21 +874,19 @@ end
 
 1. **Vue.js Style API**: Provides familiar `ref`, `reactive`, `computed` APIs
 2. **Deep Reactivity**: Default support for deep nested object reactive conversion
-3. **Precise Monitoring**: `watchReactive` provides precise property change monitoring and path tracking
-4. **High Performance**: Based on efficient doubly-linked list dependency management system
-5. **Type Safety**: Strict type checking and error handling
-6. **Memory Safety**: Automatic cleanup of unused dependency relationships
-
-### v2.0.7 Enhancements
-
-- **Version-based Deduplication**: Advanced link deduplication using version counters
-- **Specialized Watch APIs**: `watchRef()` and `watchReactive()` for type-specific optimizations
-- **Cross-Language Portability**: Lua implementation enables usage in game engines and embedded systems
-- **Dual API Architecture**: Provides both low-level primitives and high-level Vue.js-style APIs
 3. **Precise Watching**: `watchReactive` provides precise property change watching and path tracking
 4. **High Performance**: Based on efficient doubly-linked list dependency management system
 5. **Type Safety**: Strict type checking and error handling
 6. **Memory Safety**: Automatic cleanup of unused dependency relationships
+
+### v3.0.0 Enhancements
+
+- **Runtime Type Detection**: Added `isSignal`, `isComputed`, `isEffect`, `isEffectScope` functions
+- **Enhanced Context Queries**: Added `getBatchDepth` and `getActiveSub` for better introspection
+- **Optimized Performance**: Inlined tracking logic and optimized computed initialization
+- **Cleaner API Surface**: Renamed APIs for clarity, removed deprecated functions
+- **Cross-Language Portability**: Lua implementation enables usage in game engines and embedded systems
+- **Dual API Architecture**: Provides both low-level primitives and high-level Vue.js-style APIs
 
 ### Use Cases
 

@@ -1,6 +1,6 @@
 # Alien Signals - Lua响应式编程系统
 
-**版本: 2.0.7** - 兼容 alien-signals v2.0.7
+**版本: 3.0.0** - 兼容 alien-signals v3.0.0
 
 [English README](README.en.md)
 
@@ -10,12 +10,24 @@
 
 Alien Signals是一个高效的响应式编程系统，它通过简洁而强大的API，为应用提供自动依赖追踪和响应式数据流管理能力。
 
-### 2.0.7 版本新特性
+### 3.0.0 版本新特性 🎉
 
-- **版本去重机制**: 使用全局版本计数器优化依赖链接，防止同一追踪周期内的重复链接
-- **增强的 HybridReactive API**: 完善的 Vue.js 风格响应式编程接口
-- **性能优化**: 改进的循环依赖检测和链接管理算法
-- **兼容性**: 与 alien-signals v2.0.7 完全兼容
+- **新增类型检测函数**: `isSignal`, `isComputed`, `isEffect`, `isEffectScope` - 运行时检测响应式原语类型
+- **新增Getter函数**: `getActiveSub`, `getBatchDepth` - 查询当前响应式上下文状态
+- **API重命名**: `setCurrentSub/getCurrentSub` → `setActiveSub/getActiveSub` (更清晰的命名)
+- **移除废弃API**: `pauseTracking`, `resumeTracking`, `setCurrentScope`, `getCurrentScope`
+- **性能优化**: 
+  - Computed首次访问快速路径
+  - 内联Pending标志清除操作
+  - 避免不必要的activeSub访问
+  - 优化依赖清理流程
+- **内部改进**: 
+  - 分离effectOper和effectScopeOper
+  - 简化父子层级关系建立
+  - 改进unwatched节点类型识别
+- **完全兼容**: 与 alien-signals v3.0.0 完全同步
+
+> 📖 详细的升级指南请参阅 [UPGRADE_TO_3.0.0.md](UPGRADE_TO_3.0.0.md)
 
 ## 核心概念
 
@@ -574,7 +586,93 @@ multiplier(3)
 endBatch() -- 输出：结果: 30
 ```
 
-## 实现细节
+### v3.0.0 新功能
+
+#### 类型检测函数
+
+v3.0.0 新增了运行时类型检测函数，用于判断值是否为特定的响应式原语：
+
+```lua
+local reactive = require("reactive")
+local signal = reactive.signal
+local computed = reactive.computed
+local effect = reactive.effect
+local effectScope = reactive.effectScope
+
+-- 创建响应式原语
+local count = signal(0)
+local doubled = computed(function() return count() * 2 end)
+local stopEffect = effect(function() print(count()) end)
+local stopScope = effectScope(function() end)
+
+-- 类型检测
+print(reactive.isSignal(count))        -- true
+print(reactive.isSignal(doubled))      -- false
+
+print(reactive.isComputed(doubled))    -- true
+print(reactive.isComputed(count))      -- false
+
+print(reactive.isEffect(stopEffect))   -- true
+print(reactive.isEffectScope(stopScope)) -- true
+```
+
+#### 获取响应式上下文状态
+
+v3.0.0 新增了查询当前响应式上下文的函数：
+
+```lua
+local reactive = require("reactive")
+local signal = reactive.signal
+local effect = reactive.effect
+
+-- 获取批量更新深度
+print(reactive.getBatchDepth())  -- 0
+
+reactive.startBatch()
+print(reactive.getBatchDepth())  -- 1
+
+reactive.startBatch()
+print(reactive.getBatchDepth())  -- 2
+
+reactive.endBatch()
+print(reactive.getBatchDepth())  -- 1
+
+reactive.endBatch()
+print(reactive.getBatchDepth())  -- 0
+
+-- 获取当前活动订阅者
+local count = signal(0)
+print(reactive.getActiveSub() == nil)  -- true
+
+effect(function()
+    count()
+    -- 在effect内部，getActiveSub会返回当前effect
+    local sub = reactive.getActiveSub()
+    print(sub ~= nil)  -- true
+end)
+
+-- effect外部
+print(reactive.getActiveSub() == nil)  -- true
+```
+
+#### API更名说明
+
+为了更清晰的语义，v3.0.0对部分API进行了重命名：
+
+```lua
+-- v2.0.7 (旧API)
+local prevSub = reactive.setCurrentSub(nil)
+reactive.setCurrentSub(prevSub)
+
+-- v3.0.0 (新API)
+local prevSub = reactive.setActiveSub(nil)
+reactive.setActiveSub(prevSub)
+```
+
+> ⚠️ **重要**: `pauseTracking`/`resumeTracking` 和 `setCurrentScope`/`getCurrentScope` 已在v3.0.0中移除。
+> 如需暂停追踪，请使用 `setActiveSub(nil)` 代替。
+
+
 
 系统使用了以下技术来实现响应式：
 
@@ -755,7 +853,7 @@ Signal A ---> Effect 1 ---> Signal B ---> Effect 2
 
 ## 完整API参考
 
-### 底层响应式系统 (reactive.lua) - v2.0.7
+### 底层响应式系统 (reactive.lua) - v3.0.0
 
 ```lua
 local reactive = require("reactive")
@@ -770,13 +868,25 @@ local effectScope = reactive.effectScope -- 创建副作用作用域
 local startBatch = reactive.startBatch   -- 开始批量更新
 local endBatch = reactive.endBatch       -- 结束批量更新并刷新
 
--- 高级控制 API (v2.0.7)
-local setCurrentSub = reactive.setCurrentSub     -- 设置当前订阅者
-local pauseTracking = reactive.pauseTracking     -- 暂停依赖追踪
-local resumeTracking = reactive.resumeTracking   -- 恢复依赖追踪
+-- 高级控制 API (v3.0.0)
+local setActiveSub = reactive.setActiveSub       -- 设置当前活动订阅者 (v3.0.0重命名)
+local getActiveSub = reactive.getActiveSub       -- 获取当前活动订阅者 (v3.0.0重命名)
+local getBatchDepth = reactive.getBatchDepth     -- 获取批量更新深度 (v3.0.0新增)
+
+-- 类型检测 API (v3.0.0新增)
+local isSignal = reactive.isSignal               -- 检测是否为Signal
+local isComputed = reactive.isComputed           -- 检测是否为Computed
+local isEffect = reactive.isEffect               -- 检测是否为Effect
+local isEffectScope = reactive.isEffectScope     -- 检测是否为EffectScope
+
+-- 已移除的API (v3.0.0)
+-- ❌ pauseTracking - 使用 setActiveSub(nil) 代替
+-- ❌ resumeTracking - 使用 setActiveSub(prevSub) 代替
+-- ❌ setCurrentScope - 已移除
+-- ❌ getCurrentScope - 已移除
 ```
 
-### HybridReactive - Vue.js风格API (v2.0.7)
+### HybridReactive - Vue.js风格API (v3.0.0)
 
 ```lua
 local HybridReactive = require("HybridReactive")
@@ -800,39 +910,86 @@ local startBatch = HybridReactive.startBatch -- 开始批量更新
 local endBatch = HybridReactive.endBatch     -- 结束批量更新
 ```
 
-### v2.0.7 版本技术特性
+### v3.0.0 版本技术特性
 
-#### 版本去重机制
+#### 类型标记系统
 ```lua
--- 全局版本追踪防止重复链接
-local g_currentVersion = 0
+-- 唯一类型标记
+local SIGNAL_MARKER = {}
+local COMPUTED_MARKER = {}
+local EFFECT_MARKER = {}
+local EFFECTSCOPE_MARKER = {}
 
-function reactive.link(dep, sub)
-    g_currentVersion = g_currentVersion + 1
-
-    -- 检查当前周期是否已链接
-    if prevDep and prevDep.version == g_currentVersion then
-        return  -- 跳过重复链接
+-- 类型检测实现
+function reactive.isSignal(obj)
+    if type(obj) ~= "function" then return false end
+    
+    -- 通过debug库检查upvalue中的标记
+    local i = 1
+    while true do
+        local name, value = debug.getupvalue(obj, i)
+        if not name then break end
+        if name == "obj" then
+            return value._marker == SIGNAL_MARKER
+        end
+        i = i + 1
     end
-
-    -- 创建带有当前版本的新链接
-    local newLink = reactive.createLink(dep, sub, prevDep, nextDep, prevSub, nextSub)
-    newLink.version = g_currentVersion
+    return false
 end
 ```
 
-#### 增强的链接节点结构
+#### 优化的计算属性初始化
 ```lua
--- Link 结构 (v2.0.7)
-{
-    version = number,      -- 用于去重的版本号
-    dep = ReactiveObject,  -- 依赖对象
-    sub = ReactiveObject,  -- 订阅者对象
-    prevSub = Link,        -- 订阅者链表指针
-    nextSub = Link,        -- 订阅者链表指针
-    prevDep = Link,        -- 依赖链表指针
-    nextDep = Link         -- 依赖链表指针
-}
+-- v3.0.0: 移除了Dirty标志位，优化首次计算路径
+function reactive.computed(getter)
+    local obj = {
+        _getter = getter,
+        _value = nil,
+        _flags = 0,  -- v3.0.0: 初始为0，不再包含Dirty标志
+        _marker = COMPUTED_MARKER
+    }
+    
+    -- 首次访问直接计算
+    return function()
+        if obj._flags == 0 then
+            -- 快速路径：首次计算
+            local success, result = pcall(updateComputed, obj)
+            if success then
+                return result
+            end
+        end
+        -- ...
+    end
+end
+```
+
+#### 内联追踪优化
+```lua
+-- v3.0.0: 移除了startTracking/endTracking，直接内联追踪逻辑
+function run(obj)
+    -- 直接内联检查和设置
+    local shouldCleanup = obj._flags & RunningFlags ~= 0
+    if shouldCleanup then
+        obj._flags = obj._flags | NotifiedFlag
+    end
+    
+    if shouldCleanup then
+        purgeDeps(obj)
+    end
+    
+    -- 设置活动订阅者
+    local prevSub = g_activeSub
+    g_activeSub = obj
+    
+    -- 执行副作用
+    local status, err = pcall(obj._fn)
+    
+    -- 恢复前一个订阅者
+    g_activeSub = prevSub
+    
+    -- 清除标志
+    obj._flags = obj._flags & bit.bnot(RunningFlags | NotifiedFlag)
+end
 ```
 
 ## HybridReactive 特性总结
