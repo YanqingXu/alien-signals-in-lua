@@ -2,8 +2,8 @@
  * Alien Signals - A reactive programming system for Lua
  * Alien Signals - Lua 响应式编程系统
  *
- * Version: 2.0.7 (compatible with alien-signals v2.0.7)
- * 版本: 2.0.7 (兼容 alien-signals v2.0.7)
+ * Version: 3.0.0 (compatible with alien-signals v3.0.0)
+ * 版本: 3.0.0 (兼容 alien-signals v3.0.0)
  *
  * Derived from https://github.com/stackblitz/alien-signals
  * 源自 https://github.com/stackblitz/alien-signals
@@ -27,6 +27,18 @@
 local bit = require("bit")
 
 local reactive = {}
+
+--[[
+ * Type markers for reactive primitives
+ * 响应式原语的类型标记
+ *
+ * These unique markers are used to identify the type of reactive primitive.
+ * 这些唯一标记用于识别响应式原语的类型。
+]]
+local SIGNAL_MARKER = {}
+local COMPUTED_MARKER = {}
+local EFFECT_MARKER = {}
+local EFFECTSCOPE_MARKER = {}
 
 --[[
  * Simple function binding utility
@@ -71,27 +83,15 @@ local EffectFlags = {
 }
 
 --[[
- * Global state for tracking current active subscriber and scope
- * 用于跟踪当前活动订阅者和作用域的全局状态
+ * Global state for tracking current active subscriber
+ * 用于跟踪当前活动订阅者的全局状态
  *
- * These variables maintain the execution context during reactive operations.
- * They enable automatic dependency collection when signals are accessed.
- * 这些变量在响应式操作期间维护执行上下文。
- * 它们在访问信号时启用自动依赖收集。
+ * This variable maintains the execution context during reactive operations.
+ * It enables automatic dependency collection when signals are accessed.
+ * 该变量在响应式操作期间维护执行上下文。
+ * 它在访问信号时启用自动依赖收集。
 ]]
 local g_activeSub = nil    -- Current active effect or computed value / 当前活动的副作用或计算值
-local g_activeScope = nil  -- Current active effect scope / 当前活动的副作用作用域
-
---[[
- * Stack for pausing and resuming tracking
- * 用于暂停和恢复跟踪的栈
- *
- * This allows temporary suspension of dependency tracking,
- * useful for operations that shouldn't create dependencies.
- * 这允许临时暂停依赖跟踪，
- * 对于不应该创建依赖的操作很有用。
-]]
-local g_pauseStack = {}
 
 --[[
  * Queue for batched effect execution
@@ -128,8 +128,8 @@ local g_notifyIndex = 0   -- Current position in the effects queue / 副作用�
 local g_currentVersion = 0       -- Global current version counter for link deduplication / 用于链接去重的全局当前版本计数器
 
 --[[
- * Sets the current subscriber (effect or computed) and returns the previous one
- * 设置当前订阅者（副作用或计算值）并返回之前的订阅者
+ * Sets the current active subscriber (effect or computed) and returns the previous one
+ * 设置当前活动订阅者（副作用或计算值）并返回之前的订阅者
  *
  * @param sub: New subscriber to set as active / 要设置为活动的新订阅者
  * @return: Previous active subscriber / 之前的活动订阅者
@@ -141,30 +141,30 @@ local g_currentVersion = 0       -- Global current version counter for link dedu
  * 该函数管理执行上下文栈。当响应式函数（副作用或计算值）运行时，
  * 它成为活动订阅者，允许在其执行期间访问的任何信号自动注册为依赖。
 ]]
-function reactive.setCurrentSub(sub)
+function reactive.setActiveSub(sub)
     local prevSub = g_activeSub
     g_activeSub = sub
     return prevSub
 end
 
 --[[
- * Sets the current effect scope and returns the previous one
- * 设置当前副作用作用域并返回之前的作用域
+ * Gets the current active subscriber (effect or computed)
+ * 获取当前活动订阅者（副作用或计算值）
  *
- * @param scope: New scope to set as active / 要设置为活动的新作用域
- * @return: Previous active scope / 之前的活动作用域
- *
- * Effect scopes provide a way to group multiple effects together for
- * collective cleanup. When effects are created within a scope, they
- * automatically become children of that scope.
- *
- * 副作用作用域提供了将多个副作用分组在一起进行集体清理的方法。
- * 当在作用域内创建副作用时，它们自动成为该作用域的子级。
+ * @return: Current active subscriber / 当前活动订阅者
 ]]
-function reactive.setCurrentScope(scope)
-    local prevScope = g_activeScope
-    g_activeScope = scope
-    return prevScope
+function reactive.getActiveSub()
+    return g_activeSub
+end
+
+--[[
+ * Gets the current batch depth
+ * 获取当前批量深度
+ *
+ * @return: Current batch depth / 当前批量深度
+]]
+function reactive.getBatchDepth()
+    return g_batchDepth
 end
 
 --[[
@@ -199,37 +199,6 @@ function reactive.endBatch()
     if 0 == g_batchDepth then
         reactive.flush()
     end
-end
-
---[[
- * Temporarily pauses dependency tracking
- * 临时暂停依赖跟踪
- *
- * This pushes the current subscriber onto a stack and clears the active subscriber.
- * Useful when you need to access reactive values without creating dependencies.
- * Must be paired with resumeTracking() to restore the previous state.
- *
- * 这将当前订阅者推入栈并清除活动订阅者。
- * 当您需要访问响应式值而不创建依赖时很有用。
- * 必须与 resumeTracking() 配对以恢复之前的状态。
-]]
-function reactive.pauseTracking()
-    g_pauseStack[#g_pauseStack + 1] = reactive.setCurrentSub()
-end
-
---[[
- * Resumes dependency tracking after a pause
- * 暂停后恢复依赖跟踪
- *
- * This pops the previous subscriber from the stack and restores it as active.
- * Must be called after pauseTracking() to maintain proper tracking state.
- *
- * 这从栈中弹出之前的订阅者并将其恢复为活动状态。
- * 必须在 pauseTracking() 之后调用以维护正确的跟踪状态。
-]]
-function reactive.resumeTracking()
-    local top = table.remove(g_pauseStack, #g_pauseStack)
-    reactive.setCurrentSub(top)
 end
 
 --[[
@@ -282,13 +251,39 @@ function reactive.run(e, flags)
     local isDirty = bit.band(flags, ReactiveFlags.Dirty) > 0
     local isPending = bit.band(flags, ReactiveFlags.Pending) > 0
 
+    -- Check if we need to run the effect
+    -- 检查是否需要运行副作用
+    local shouldRun = false
+    if isDirty then
+        shouldRun = true
+    elseif isPending then
+        if reactive.checkDirty(e.deps, e) then
+            shouldRun = true
+        else
+            -- Clear pending flag if not dirty
+            -- 如果不是脏的则清除待定标志
+            e.flags = bit.band(flags, bit.bnot(ReactiveFlags.Pending))
+        end
+    end
+
     -- If the effect is dirty or it's pending and has dirty dependencies
     -- 如果副作用是脏的，或者它是待定的且有脏依赖
-    if isDirty or (isPending and reactive.checkDirty(e.deps, e)) then
+    if shouldRun then
+        -- Increment global version counter for this tracking cycle
+        -- 为此跟踪周期递增全局版本计数器
+        g_currentVersion = g_currentVersion + 1
+
+        -- Reset dependency tail to collect dependencies from scratch
+        -- 重置依赖尾部以从头收集依赖
+        e.depsTail = nil
+
+        -- Set flags: Watching | RecursedCheck (2 | 4 = 6)
+        -- 设置标志：监视 | 递归检查
+        e.flags = 6
+
         -- Track effect execution to collect dependencies
         -- 跟踪副作用执行以收集依赖
-        local prev = reactive.setCurrentSub(e)
-        reactive.startTracking(e)
+        local prev = reactive.setActiveSub(e)
 
         -- Execute the effect function safely
         -- 安全地执行副作用函数
@@ -299,33 +294,32 @@ function reactive.run(e, flags)
 
         -- Restore previous state and finish tracking
         -- 恢复之前的状态并完成跟踪
-        reactive.setCurrentSub(prev)
-        reactive.endTracking(e)
+        g_activeSub = prev
 
-        return
-    end
+        -- Clear the recursion check flag
+        -- 清除递归检查标志
+        e.flags = bit.band(e.flags, bit.bnot(ReactiveFlags.RecursedCheck))
 
-    -- Clear pending flag if needed
-    -- 如果需要，清除待定标志
-    if isPending then
-        e.flags = bit.band(flags, bit.bnot(ReactiveFlags.Pending))
-    end
+        -- Purge stale dependencies
+        -- 清除陈旧依赖
+        reactive.purgeDeps(e)
+    else
+        -- Process queued dependent effects
+        -- 处理排队的依赖副作用
+        local link = e.deps
+        while link do
+            local dep = link.dep
+            local depFlags = dep.flags
 
-    -- Process queued dependent effects
-    -- 处理排队的依赖副作用
-    local link = e.deps
-    while link do
-        local dep = link.dep
-        local depFlags = dep.flags
+            -- If dependent effect is queued, run it
+            -- 如果依赖副作用已排队，运行它
+            if bit.band(depFlags, EffectFlags.Queued) > 0 then
+                dep.flags = bit.band(depFlags, bit.bnot(EffectFlags.Queued))
+                reactive.run(dep, dep.flags)
+            end
 
-        -- If dependent effect is queued, run it
-        -- 如果依赖副作用已排队，运行它
-        if bit.band(depFlags, EffectFlags.Queued) > 0 then
-            dep.flags = bit.band(depFlags, bit.bnot(EffectFlags.Queued))
-            reactive.run(dep, dep.flags)
+            link = link.nextDep
         end
-
-        link = link.nextDep
     end
 end
 
@@ -385,7 +379,11 @@ end
  * 3. 维护正确的双向链表结构
  * 4. 为按顺序添加依赖的常见情况进行优化
 ]]
-function reactive.link(dep, sub)
+function reactive.link(dep, sub, version)
+    -- Use provided version or current global version
+    -- 使用提供的版本或当前全局版本
+    local linkVersion = version or g_currentVersion
+
     -- Check if this dependency is already the last one in the chain
     -- 检查这个依赖是否已经是链中的最后一个
     local prevDep = sub.depsTail
@@ -409,7 +407,7 @@ function reactive.link(dep, sub)
         -- If we already have this dependency in the chain during recursion check
         -- 如果在递归检查期间链中已经有这个依赖
         if nextDep and nextDep.dep == dep then
-            nextDep.version = g_currentVersion  -- Update version for current cycle / 为当前周期更新版本号
+            nextDep.version = linkVersion  -- Update version for current cycle / 为当前周期更新版本号
             sub.depsTail = nextDep
             return
         end
@@ -418,7 +416,7 @@ function reactive.link(dep, sub)
     -- Check if the sub is already subscribed to this dependency using version-based deduplication
     -- 使用基于版本号的去重检查订阅者是否已经订阅了这个依赖
     local prevSub = dep.subsTail
-    if prevSub and prevSub.version == g_currentVersion and prevSub.sub == sub then
+    if prevSub and prevSub.version == linkVersion and prevSub.sub == sub then
         -- Only deduplicate if it's the same subscriber AND same tracking cycle (matching TypeScript logic)
         -- 只有在同一个订阅者且同一个跟踪周期时才去重（匹配TypeScript逻辑）
         return
@@ -427,7 +425,7 @@ function reactive.link(dep, sub)
     -- Create a new link and insert it in both chains
     -- 创建新链接并将其插入到两个链中
     local newLink = reactive.createLink(dep, sub, prevDep, nextDep, prevSub)
-    newLink.version = g_currentVersion  -- Set current version for deduplication / 设置当前版本号用于去重
+    newLink.version = linkVersion  -- Set current version for deduplication / 设置当前版本号用于去重
     dep.subsTail = newLink  -- Add to dependency's subscribers chain / 添加到依赖的订阅者链
     sub.depsTail = newLink  -- Add to subscriber's dependencies chain / 添加到订阅者的依赖链
 
@@ -701,6 +699,34 @@ function reactive.endTracking(sub)
 end
 
 --[[
+ * Purges stale dependencies from a subscriber
+ * 清除订阅者的陈旧依赖
+ *
+ * @param sub: The subscriber (effect or computed) / 订阅者（副作用或计算值）
+ *
+ * This function removes dependencies that were not accessed during the last
+ * execution of a reactive function. It's used after tracking is complete.
+ *
+ * 该函数移除在响应式函数最后一次执行期间未访问的依赖。
+ * 它在跟踪完成后使用。
+]]
+function reactive.purgeDeps(sub)
+    local depsTail = sub.depsTail
+    local toRemove
+    if depsTail then
+        toRemove = depsTail.nextDep
+    else
+        toRemove = sub.deps
+    end
+
+    -- Remove all dependencies that were not accessed during this execution
+    -- 移除在此次执行中未访问的所有依赖
+    while toRemove do
+        toRemove = reactive.unlink(toRemove, sub)
+    end
+end
+
+--[[
  * Processes the stack unwinding phase during dependency checking
  * 处理依赖检查期间的栈展开阶段
  *
@@ -878,8 +904,19 @@ function reactive.updateSignal(signal, value)
 end
 
 function reactive.updateComputed(c)
-    local prevSub = reactive.setCurrentSub(c)
-    reactive.startTracking(c)
+    -- Increment global version counter for this tracking cycle
+    -- 为此跟踪周期递增全局版本计数器
+    g_currentVersion = g_currentVersion + 1
+
+    -- Reset dependency tail to collect dependencies from scratch
+    -- 重置依赖尾部以从头收集依赖
+    c.depsTail = nil
+
+    -- Set flags: Mutable | RecursedCheck (1 | 4 = 5)
+    -- 设置标志：可变 | 递归检查
+    c.flags = 5
+
+    local prevSub = reactive.setActiveSub(c)
 
     local oldValue = c.value
     local newValue = oldValue
@@ -893,8 +930,15 @@ function reactive.updateComputed(c)
         print("Error in computed: " .. err)
     end
 
-    reactive.setCurrentSub(prevSub)
-    reactive.endTracking(c)
+    g_activeSub = prevSub
+
+    -- Clear the recursion check flag
+    -- 清除递归检查标志
+    c.flags = bit.band(c.flags, bit.bnot(ReactiveFlags.RecursedCheck))
+
+    -- Purge stale dependencies
+    -- 清除陈旧依赖
+    reactive.purgeDeps(c)
 
     return newValue ~= oldValue
 end
@@ -944,10 +988,23 @@ function reactive.unwatched(node)
         repeat
             toRemove = reactive.unlink(toRemove, node)
         until not toRemove
-    elseif not node.previousValue then
-        -- For effects and effect scopes, clean up
-        -- 对于副作用和副作用作用域，进行清理
+    elseif node.fn then
+        -- For effects, clean up
+        -- 对于副作用，进行清理
         reactive.effectOper(node)
+    elseif not node.previousValue then
+        -- For effect scopes (no getter, no fn, no previousValue), clean up
+        -- 对于副作用作用域（无getter、无fn、无previousValue），进行清理
+        -- Inline effectScopeOper logic
+        -- 内联effectScopeOper逻辑
+        local dep = node.deps
+        while(dep) do
+            dep = reactive.unlink(dep, node)
+        end
+        local sub = node.subs
+        if sub then
+            reactive.unlink(sub)
+        end
     end
 end
 
@@ -1071,6 +1128,7 @@ end
 ]]
 local function signal(initialValue)
     local s = {
+        __type = SIGNAL_MARKER,    -- Type marker for isSignal / isSignal的类型标记
         previousValue = initialValue, -- For change detection / 用于变更检测
         value = initialValue,         -- Current value / 当前值
         subs = nil,                   -- Linked list of subscribers (head) / 订阅者链表（头部）
@@ -1107,9 +1165,24 @@ local function computedOper(this)
     local isDirty = bit.band(flags, ReactiveFlags.Dirty) > 0
     local maybeDirty = bit.band(flags, ReactiveFlags.Pending) > 0
 
+    -- Check if we need to recalculate
+    -- 检查是否需要重新计算
+    local shouldUpdate = false
+    if isDirty then
+        shouldUpdate = true
+    elseif maybeDirty then
+        if reactive.checkDirty(this.deps, this) then
+            shouldUpdate = true
+        else
+            -- Clear pending flag if not dirty
+            -- 如果不是脏的则清除待定标志
+            this.flags = bit.band(flags, bit.bnot(ReactiveFlags.Pending))
+        end
+    end
+
     -- Recalculate value if it's dirty or possibly dirty (needs checking)
     -- 如果是脏的或可能是脏的（需要检查），则重新计算值
-    if isDirty or (maybeDirty and reactive.checkDirty(this.deps, this)) then
+    if shouldUpdate then
         if reactive.updateComputed(this) then
             -- Notify subscribers if value changed
             -- 如果值发生变化，通知订阅者
@@ -1118,18 +1191,25 @@ local function computedOper(this)
                 reactive.shallowPropagate(subs)
             end
         end
-    elseif bit.band(flags, ReactiveFlags.Pending) > 0 then
-        -- Clear pending flag if we determined it's not dirty
-        -- 如果我们确定它不是脏的，清除待定标志
-        this.flags = bit.band(flags, bit.bnot(ReactiveFlags.Pending))
+    elseif flags == 0 then
+        -- Fast path for first time access
+        -- 首次访问的快速路径
+        this.flags = ReactiveFlags.Mutable
+        local prevSub = reactive.setActiveSub(this)
+        local result, value = pcall(this.getter)
+        if result then
+            this.value = value
+        else
+            print("Error in computed: " .. value)
+        end
+        g_activeSub = prevSub
     end
 
-    -- Register this computed as a dependency of the current subscriber or scope
-    -- 将此计算值注册为当前订阅者或作用域的依赖
-    if g_activeSub then
-        reactive.link(this, g_activeSub)
-    elseif g_activeScope then
-        reactive.link(this, g_activeScope)
+    -- Register this computed as a dependency of the current subscriber
+    -- 将此计算值注册为当前订阅者的依赖
+    local sub = g_activeSub
+    if sub then
+        reactive.link(this, sub, g_currentVersion)
     end
 
     return this.value
@@ -1151,12 +1231,13 @@ end
 ]]
 local function computed(getter)
     local c = {
+        __type = COMPUTED_MARKER,  -- Type marker for isComputed / isComputed的类型标记
         value = nil,               -- Cached value / 缓存值
         subs = nil,                -- Linked list of subscribers (head) / 订阅者链表（头部）
         subsTail = nil,            -- Linked list of subscribers (tail) / 订阅者链表（尾部）
         deps = nil,                -- Dependencies linked list (head) / 依赖链表（头部）
         depsTail = nil,            -- Dependencies linked list (tail) / 依赖链表（尾部）
-        flags = bit.bor(ReactiveFlags.Mutable, ReactiveFlags.Dirty), -- Initially dirty / 初始为脏
+        flags = ReactiveFlags.None, -- Initially no flags (will be set on first access) / 初始无标志（首次访问时设置）
         getter = getter,           -- Function to compute the value / 计算值的函数
     }
 
@@ -1172,23 +1253,21 @@ end
 ]]
 
 --[[
- * Effect cleanup operator - stops an effect or effect scope
- * 副作用清理操作符 - 停止副作用或副作用作用域
+ * Effect scope cleanup operator - stops an effect scope
+ * 副作用作用域清理操作符 - 停止副作用作用域
  *
- * @param this: Effect or EffectScope object / 副作用或副作用作用域对象
+ * @param this: EffectScope object / 副作用作用域对象
  * @return: nil
  *
- * This function performs complete cleanup of an effect or effect scope:
- * 1. Removes all dependency links to prevent memory leaks
- * 2. Unlinks from parent effects/scopes if any
- * 3. Clears all state flags to mark as inactive
+ * This function performs cleanup of an effect scope:
+ * 1. Removes all dependency links
+ * 2. Unlinks from parent scopes if any
  *
- * 该函数执行副作用或副作用作用域的完整清理：
- * 1. 移除所有依赖链接以防止内存泄漏
- * 2. 如果有的话，从父副作用/作用域取消链接
- * 3. 清除所有状态标志以标记为非活动
+ * 该函数执行副作用作用域的清理：
+ * 1. 移除所有依赖链接
+ * 2. 如果有的话，从父作用域取消链接
 ]]
-local function effectOper(this)
+local function effectScopeOper(this)
     -- Unlink all dependencies
     -- 取消所有依赖的链接
     local dep = this.deps
@@ -1196,15 +1275,33 @@ local function effectOper(this)
         dep = reactive.unlink(dep, this)
     end
 
-    -- If this effect is a dependency for other effects, unlink it
-    -- 如果此副作用是其他副作用的依赖，取消其链接
+    -- If this effect/scope is a dependency for other effects, unlink it
+    -- 如果此副作用/作用域是其他副作用的依赖，取消其链接
     local sub = this.subs
     if sub then
         reactive.unlink(sub)
     end
+end
 
-    -- Clear all state flags
-    -- 清除所有状态标志
+--[[
+ * Effect cleanup operator - stops an effect
+ * 副作用清理操作符 - 停止副作用
+ *
+ * @param this: Effect object / 副作用对象
+ * @return: nil
+ *
+ * This function performs complete cleanup of an effect:
+ * 1. Removes all dependency links to prevent memory leaks
+ * 2. Unlinks from parent effects/scopes if any
+ * 3. Clears all state flags to mark as inactive
+ *
+ * 该函数执行副作用的完整清理：
+ * 1. 移除所有依赖链接以防止内存泄漏
+ * 2. 如果有的话，从父副作用/作用域取消链接
+ * 3. 清除所有状态标志以标记为非活动
+]]
+local function effectOper(this)
+    effectScopeOper(this)
     this.flags = ReactiveFlags.None
 end
 reactive.effectOper = effectOper
@@ -1236,6 +1333,7 @@ local function effect(fn)
     -- Create the effect object
     -- 创建副作用对象
     local e = {
+        __type = EFFECT_MARKER,     -- Type marker for isEffect / isEffect的类型标记
         fn = fn,                    -- The effect function / 副作用函数
         subs = nil,                 -- Subscribers (if this effect is a dependency) / 订阅者（如果此副作用是依赖）
         subsTail = nil,             -- End of subscribers list / 订阅者列表的末尾
@@ -1244,19 +1342,20 @@ local function effect(fn)
         flags = ReactiveFlags.Watching, -- Mark as watching (reactive) / 标记为监视（响应式）
     }
 
-    -- Register as child of parent effect or scope if any
-    -- 如果有的话，注册为父副作用或作用域的子级
-    if g_activeSub then
-        reactive.link(e, g_activeSub)
-    elseif g_activeScope then
-        reactive.link(e, g_activeScope)
+    -- Set this effect as active subscriber and link to parent if any
+    -- 将此副作用设置为活动订阅者，如果有父级则链接到父级
+    local prevSub = reactive.setActiveSub(e)
+    if prevSub then
+        reactive.link(e, prevSub, 0)
     end
 
     -- Run the effect for the first time, collecting dependencies
     -- 第一次运行副作用，收集依赖
-    local prev = reactive.setCurrentSub(e)
     local success, err = pcall(fn)
-    reactive.setCurrentSub(prev)
+
+    -- Restore previous subscriber
+    -- 恢复之前的订阅者
+    g_activeSub = prevSub
 
     if not success then
         error(err)
@@ -1292,6 +1391,7 @@ local function effectScope(fn)
     -- Create the effect scope object
     -- 创建副作用作用域对象
     local e = {
+        __type = EFFECTSCOPE_MARKER, -- Type marker for isEffectScope / isEffectScope的类型标记
         deps = nil,           -- Dependencies linked list (head) / 依赖链表（头部）
         depsTail = nil,       -- Dependencies linked list (tail) / 依赖链表（尾部）
         subs = nil,           -- Subscribers (child effects) / 订阅者（子副作用）
@@ -1299,25 +1399,22 @@ local function effectScope(fn)
         flags = ReactiveFlags.None, -- No special flags needed / 不需要特殊标志
     }
 
-    -- Register as child of parent scope if any
-    -- 如果有的话，注册为父作用域的子级
-    if g_activeScope then
-        reactive.link(e, g_activeScope)
+    -- Set this scope as active subscriber and link to parent if any
+    -- 将此作用域设置为活动订阅者，如果有父级则链接到父级
+    local prevSub = reactive.setActiveSub(e)
+    if prevSub then
+        reactive.link(e, prevSub, 0)
     end
 
-    -- Set this as the current scope and execute the function
-    -- 将此设置为当前作用域并执行函数
-    local prevSub = reactive.setCurrentSub()
-    local prevScope = reactive.setCurrentScope(e)
-
+    -- Execute the function to create effects within this scope
+    -- 执行函数以在此作用域内创建副作用
     local success, err = pcall(function()
         fn()
     end)
 
-    -- Restore previous scope and subscriber
-    -- 恢复之前的作用域和订阅者
-    reactive.setCurrentScope(prevScope)
-    reactive.setCurrentSub(prevSub)
+    -- Restore previous subscriber
+    -- 恢复之前的订阅者
+    g_activeSub = prevSub
 
     if not success then
         error(err)
@@ -1325,7 +1422,83 @@ local function effectScope(fn)
 
     -- Return the cleanup function for the entire scope
     -- 返回整个作用域的清理函数
-    return bind(effectOper, e)
+    return bind(effectScopeOper, e)
+end
+
+--[[
+ * Type checking functions
+ * 类型检测函数
+ *
+ * These functions check if a value is a specific reactive primitive type
+ * by checking for unique marker properties.
+ *
+ * 这些函数通过检查唯一标记属性来检查值是否为特定的响应式原语类型。
+]]
+
+local function isSignal(fn)
+    if type(fn) ~= "function" then
+        return false
+    end
+    -- Access the internal structure via upvalues
+    -- 通过upvalues访问内部结构
+    local i = 1
+    while true do
+        local name, value = debug.getupvalue(fn, i)
+        if not name then break end
+        if name == "obj" and type(value) == "table" then
+            return value.__type == SIGNAL_MARKER
+        end
+        i = i + 1
+    end
+    return false
+end
+
+local function isComputed(fn)
+    if type(fn) ~= "function" then
+        return false
+    end
+    local i = 1
+    while true do
+        local name, value = debug.getupvalue(fn, i)
+        if not name then break end
+        if name == "obj" and type(value) == "table" then
+            return value.__type == COMPUTED_MARKER
+        end
+        i = i + 1
+    end
+    return false
+end
+
+local function isEffect(fn)
+    if type(fn) ~= "function" then
+        return false
+    end
+    local i = 1
+    while true do
+        local name, value = debug.getupvalue(fn, i)
+        if not name then break end
+        if name == "obj" and type(value) == "table" then
+            return value.__type == EFFECT_MARKER
+        end
+        i = i + 1
+    end
+    return false
+end
+
+local function isEffectScope(fn)
+    if type(fn) ~= "function" then
+        return false
+    end
+    local i = 1
+    while true do
+        local name, value = debug.getupvalue(fn, i)
+        if not name then break end
+        if name == "obj" and type(value) == "table" then
+            return value.__type == EFFECTSCOPE_MARKER
+        end
+        i = i + 1
+    end
+    return false
 end
 
 --[[
@@ -1347,12 +1520,20 @@ return {
     effect = effect,           -- Create a reactive effect / 创建响应式副作用
     effectScope = effectScope, -- Create an effect scope / 创建副作用作用域
 
+    -- Type checking / 类型检查
+    isSignal = isSignal,       -- Check if value is a signal / 检查值是否为信号
+    isComputed = isComputed,   -- Check if value is a computed / 检查值是否为计算值
+    isEffect = isEffect,       -- Check if value is an effect / 检查值是否为副作用
+    isEffectScope = isEffectScope, -- Check if value is an effect scope / 检查值是否为副作用作用域
+
     -- Batch operation utilities / 批量操作工具
     startBatch = reactive.startBatch,  -- Start batch updates / 开始批量更新
     endBatch = reactive.endBatch,      -- End batch updates and flush / 结束批量更新并刷新
 
+    -- Getter functions / 获取函数
+    getActiveSub = reactive.getActiveSub,  -- Get current active subscriber / 获取当前活动订阅者
+    getBatchDepth = reactive.getBatchDepth, -- Get current batch depth / 获取当前批量深度
+
     -- Advanced API (for internal or advanced usage) / 高级 API（用于内部或高级用法）
-    setCurrentSub = reactive.setCurrentSub,  -- Set current subscriber / 设置当前订阅者
-    pauseTracking = reactive.pauseTracking,  -- Pause dependency tracking / 暂停依赖跟踪
-    resumeTracking = reactive.resumeTracking, -- Resume dependency tracking / 恢复依赖跟踪
+    setActiveSub = reactive.setActiveSub,  -- Set current subscriber / 设置当前订阅者
 }

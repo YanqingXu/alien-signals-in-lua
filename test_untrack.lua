@@ -8,7 +8,7 @@ local signal = reactive.signal
 local computed = reactive.computed
 local effect = reactive.effect
 local effectScope = reactive.effectScope
-local setCurrentSub = reactive.setCurrentSub
+local setActiveSub = reactive.setActiveSub
 
 local utils = require("utils")
 local test = utils.test
@@ -20,9 +20,9 @@ test('should pause tracking in computed', function()
     local computedTriggerTimes = 0
     local c = computed(function()
         computedTriggerTimes = computedTriggerTimes + 1
-        local currentSub = setCurrentSub(nil)
+        local currentSub = setActiveSub(nil)
         local value = src()
-        setCurrentSub(currentSub)
+        setActiveSub(currentSub)
         return value
     end)
 
@@ -45,9 +45,9 @@ test('should pause tracking in effect', function()
     effect(function()
         effectTriggerTimes = effectTriggerTimes + 1
         if is() ~= 0 then
-            local currentSub = setCurrentSub(nil)
+            local currentSub = setActiveSub(nil)
             src()
-            setCurrentSub(currentSub)
+            setActiveSub(currentSub)
         end
     end)
 
@@ -86,9 +86,9 @@ test('should pause tracking in effect scope', function()
     effectScope(function()
         effect(function()
             effectTriggerTimes = effectTriggerTimes + 1
-            local currentSub = setCurrentSub(nil)
+            local currentSub = setActiveSub(nil)
             src()
-            setCurrentSub(currentSub)
+            setActiveSub(currentSub)
         end)
     end)
 

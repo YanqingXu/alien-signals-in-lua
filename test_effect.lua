@@ -10,7 +10,7 @@ local effect = reactive.effect
 local effectScope = reactive.effectScope
 local startBatch = reactive.startBatch
 local endBatch = reactive.endBatch
-local setCurrentSub = reactive.setCurrentSub
+local setActiveSub = reactive.setActiveSub
 
 local utils = require("utils")
 local test = utils.test
@@ -210,9 +210,9 @@ test('should duplicate subscribers do not affect the notify order', function()
 
     effect(function()
         table.insert(order, 'a')
-        local currentSub = setCurrentSub(nil)
+        local currentSub = setActiveSub(nil)
         local isOne = src2() == 1
-        setCurrentSub(currentSub)
+        setActiveSub(currentSub)
         if isOne then
             src1()
         end
