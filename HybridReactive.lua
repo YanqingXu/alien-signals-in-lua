@@ -346,9 +346,10 @@ function HybridReactive.watchReactive(reactiveObj, callback, shallow)
                     if not shallow and HybridReactive.isReactive(newValue) and not watchedObjects[newValue] then
                         -- Pause tracking to avoid dependency issues when creating nested watchers
                         -- 暂停跟踪以避免创建嵌套监听器时的依赖问题
-                        reactive.pauseTracking()
+                        -- v3.0.0: Use setActiveSub instead of pauseTracking/resumeTracking
+                        local prevSub = reactive.setActiveSub(nil)
                         watchSingleObject(newValue, fullPath)
-                        reactive.resumeTracking()
+                        reactive.setActiveSub(prevSub)
                     end
                 end
             end)
