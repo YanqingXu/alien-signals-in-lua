@@ -81,7 +81,7 @@ count(5)  -- Won't trigger any output
 
 ## Advanced Features
 
-#### Batch Updates
+### Batch Updates
 
 When performing multiple state updates, you can use batch update mode to avoid triggering effects multiple times, improving performance.
 
@@ -308,87 +308,6 @@ This complex dependency relationship is efficiently managed through the doubly-l
 4. Lua 5.1 Compatibility
    - Supports Lua 5.1
    - All examples and tests are compatible with both Lua 5.1 and newer versions
-
-## HybridReactive Test Suite
-
-To ensure the stability and correctness of HybridReactive functionality, the project provides a comprehensive test suite.
-
-### Test Files
-
-- **`test_hybrid_reactive.lua`** - Comprehensive test suite containing all HybridReactive functionality tests
-- **`run_hybrid_reactive_tests.lua`** - Dedicated test runner
-
-### Running Tests
-
-```bash
-# Run the complete HybridReactive test suite
-lua run_hybrid_reactive_tests.lua
-
-# Or run the test file directly
-lua test_hybrid_reactive.lua
-```
-
-### Test Coverage
-
-The test suite is divided into **6 main sections** with **17 comprehensive test cases**:
-
-#### 1. Basic Functionality Tests
-- Basic callback functionality verification
-- Shallow vs deep watching tests
-- Multiple watchers working together
-- Watcher lifecycle management
-
-#### 2. Path Tracking and Same Key Tests
-- Distinguishing same property names at different levels (`obj.name` vs `obj.user.name`)
-- Deep nested path accuracy verification
-
-#### 3. Advanced Feature Tests
-- Deep watching after object replacement
-- Mixed data type handling
-- Batch operation support
-
-#### 4. Error Handling and Edge Cases
-- Invalid parameter error handling
-- Circular reference scenario stability
-
-#### 5. Performance Tests
-- Large object performance (500+ properties)
-- Deep nesting performance (20+ levels)
-- Multiple watcher performance (50+ watchers)
-
-#### 6. Integration Tests
-- Integration with `ref` objects
-- Stress testing with rapid consecutive modifications
-
-### Performance Benchmarks
-
-Performance in standard test environment:
-- **500-property object setup**: ~2ms
-- **50 watcher setup**: ~1ms
-- **100 rapid modifications**: ~2ms
-- **20-level deep nesting**: ~1ms
-
-### Test Result Example
-
-```
-========== Comprehensive HybridReactive.watchReactive Test Suite ==========
-
-SECTION 1: Basic Functionality Tests
-=====================================
-[OK] Basic callback functionality
-[OK] Shallow vs deep monitoring
-[OK] Multiple watchers on same object
-[OK] Watcher lifecycle and cleanup
-
-SECTION 2: Path Tracking and Same Key Tests
-============================================
-[OK] Same key at different levels
-[OK] Path tracking accuracy
-
-... (other sections)
-
-[OK] ALL WATCHREACTIVE TESTS COMPLETED SUCCESSFULLY! [OK]
-```
 
 ## Complete API Reference
 
