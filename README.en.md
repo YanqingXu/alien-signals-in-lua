@@ -10,30 +10,6 @@ This project is ported from [stackblitz/alien-signals](https://github.com/stackb
 
 Alien Signals is an efficient reactive programming system. It provides automatic dependency tracking and reactive data flow management capabilities for applications through a clean and powerful API.
 
-### Updates in v3.0.1 🔄
-
-- **Signal Property Rename**: `previousValue/value` → `currentValue/pendingValue` (clearer semantics)
-- **Computed Initialization**: Mark as Dirty on creation, removed first access fast path
-- **Simplified Cleanup**: effectScopeOper now uses purgeDeps for unified dependency cleanup
-- **Improved Type Checking**: unwatched function uses flags check instead of property checks
-- **API Stability**: All public APIs remain unchanged, upgrade requires no code changes
-- **Fully Compatible**: Fully synchronized with alien-signals v3.0.1
-
-> 📖 For detailed changelog, see [CHANGELOG_3.0.1.md](CHANGELOG_3.0.1.md)
-
-### New Features in v3.0.0 🎉
-
-- **Type Detection Functions**: Added runtime type checking functions - `isSignal`, `isComputed`, `isEffect`, `isEffectScope`
-- **New Getters**: Added `getBatchDepth` and `getActiveSub` for querying reactive context state
-- **API Renames**: Renamed `setCurrentSub`→`setActiveSub`, `getCurrentSub`→`getActiveSub` for clearer semantics
-- **Removed Deprecated APIs**: Removed `pauseTracking`/`resumeTracking`, `setCurrentScope`/`getCurrentScope`
-- **Computed Optimization**: Removed initial Dirty flag, added fast path for first computation
-- **Internal Optimizations**: Removed `startTracking`/`endTracking`, inlined tracking logic for better performance
-- **Link Enhancement**: Added third parameter support to `link` function for more flexible dependency management
-- **Pending Flag Cleanup**: Inlined pending flag clearing logic for reduced function call overhead
-
-> ⚠️ **Breaking Changes**: v3.0.0 was a major version update. Please refer to [UPGRADE_TO_3.0.0.md](UPGRADE_TO_3.0.0.md) for migration guide.
-
 ## Core Concepts
 
 1. Signal
@@ -103,256 +79,7 @@ cleanup()  -- Cleans up all effect functions in the scope
 count(5)  -- Won't trigger any output
 ```
 
-## HybridReactive - Vue.js Style API
-
-In addition to the low-level reactive system, this project also provides a Vue.js-like high-level reactive API - HybridReactive, which offers a more friendly and intuitive interface.
-
-### Core APIs
-
-- `ref(value)` - Create reactive reference
-- `reactive(obj, shallow)` - Convert object to reactive object (supports deep/shallow reactivity)
-- `computed(fn)` - Create computed property
-
-### Watching APIs
-
-- `watch(callback)` - Watch reactive data changes
-- `watchRef(ref, callback)` - Watch ref object changes
-- `watchReactive(reactive, callback, shallow)` - Watch reactive object property changes
-
-### Utility Functions
-
-- `isRef(value)` - Check if value is a ref object
-- `isReactive(value)` - Check if value is a reactive object
-
-### Basic Usage
-
-```lua
-local HybridReactive = require("HybridReactive")
-
--- Create reactive reference
-local count = HybridReactive.ref(0)
-local name = HybridReactive.ref("Alice")
-
--- Access and modify values
-print(count.value)  -- 0
-count.value = 10
-print(count.value)  -- 10
-
--- Create computed property
-local doubled = HybridReactive.computed(function()
-    return count.value * 2
-end)
-
-print(doubled.value)  -- 20
-
--- Create reactive object
-local state = HybridReactive.reactive({
-    user = "Bob",
-    age = 25
-})
-
-print(state.user)  -- Bob
-state.age = 30
-print(state.age)   -- 30
-```
-
-### `reactive(obj, shallow)`
-
-Convert a plain object to a reactive object.
-
-**Parameters:**
-- `obj`: Object to convert
-- `shallow`: Optional boolean, defaults to `false`
-  - `false` (default): Deep reactivity, nested objects are also converted to reactive
-  - `true`: Shallow reactivity, only first-level properties are reactive
-
-**Deep Reactivity (default behavior):**
-```lua
-local obj = HybridReactive.reactive({
-    user = {
-        name = "Alice",
-        profile = {
-            age = 25,
-            address = { city = "Beijing" }
-        }
-    }
-})
-
--- All nested objects are reactive
-print(HybridReactive.isReactive(obj.user))                    -- true
-print(HybridReactive.isReactive(obj.user.profile))           -- true
-print(HybridReactive.isReactive(obj.user.profile.address))   -- true
-
--- Can watch changes at any level
-obj.user.name = "Bob"                    -- Triggers reactive update
-obj.user.profile.age = 30                -- Triggers reactive update
-obj.user.profile.address.city = "Shanghai"  -- Triggers reactive update
-```
-
-**Shallow Reactivity:**
-```lua
-local obj = HybridReactive.reactive({
-    user = { name = "Alice", age = 25 },
-    settings = { theme = "light" }
-}, true)  -- shallow = true
-
--- Only first level is reactive
-print(HybridReactive.isReactive(obj.user))     -- false
-print(HybridReactive.isReactive(obj.settings)) -- false
-
--- Can only watch first-level changes
-obj.user = { name = "Bob", age = 30 }      -- Triggers reactive update
-obj.user.name = "Charlie"                  -- Won't trigger reactive update (user is not reactive)
-```
-
-### watchRef - Watch ref object changes
-
-`watchRef` is a function specifically designed to watch ref object changes. It calls the callback function when the ref's value changes, providing both new and old values as parameters.
-
-#### Syntax
-
-```lua
-local stopWatching = HybridReactive.watchRef(refObj, callback)
-```
-
-- `refObj`: The ref object to watch
-- `callback`: Callback function that receives `(newValue, oldValue)` parameters
-- Return value: Function to stop watching
-
-#### Usage Example
-
-```lua
-local HybridReactive = require("HybridReactive")
-
--- Watch number changes
-local counter = HybridReactive.ref(0)
-
-local stopWatching = HybridReactive.watchRef(counter, function(newValue, oldValue)
-    print(string.format("Counter changed from %d to %d", oldValue, newValue))
-end)
-
-counter.value = 1  -- Output: Counter changed from 0 to 1
-counter.value = 5  -- Output: Counter changed from 1 to 5
-counter.value = 5  -- Won't trigger callback (value unchanged)
-
--- Stop watching
-stopWatching()
-counter.value = 10 -- Won't trigger callback
-```
-
-### watchReactive - Watch reactive object changes
-
-`watchReactive` is a function specifically designed to watch reactive object property changes. It calls the callback function when any property of the reactive object changes.
-
-#### Syntax
-
-```lua
-local stopWatching = HybridReactive.watchReactive(reactiveObj, callback, shallow)
-```
-
-- `reactiveObj`: The reactive object to watch
-- `callback`: Callback function that receives `(key, newValue, oldValue, path)` parameters
-- `shallow`: Optional boolean, defaults to `false`
-  - `false` (default): Deep watching, recursively watch nested object changes
-  - `true`: Shallow watching, only watch first-level property changes
-- Return value: Function to stop watching
-
-#### Basic Usage Example
-
-```lua
-local HybridReactive = require("HybridReactive")
-
--- Create reactive object
-local user = HybridReactive.reactive({
-    name = "Alice",
-    age = 25,
-    profile = {
-        email = "alice@example.com",
-        settings = {
-            theme = "light"
-        }
-    }
-})
-
--- Deep watching (default)
-local stopWatching = HybridReactive.watchReactive(user, function(key, newValue, oldValue, path)
-    print(string.format("Property '%s' at path '%s' changed from '%s' to '%s'",
-          key, path or key, tostring(oldValue), tostring(newValue)))
-end)
-
-user.name = "Bob"                           -- Output: Property 'name' at path 'name' changed from 'Alice' to 'Bob'
-user.profile.email = "bob@example.com"      -- Output: Property 'email' at path 'profile.email' changed from 'alice@example.com' to 'bob@example.com'
-user.profile.settings.theme = "dark"       -- Output: Property 'theme' at path 'profile.settings.theme' changed from 'light' to 'dark'
-
--- Stop watching
-stopWatching()
-user.name = "Charlie"  -- Won't trigger callback
-```
-
-#### Shallow vs Deep Watching
-
-```lua
-local obj = HybridReactive.reactive({
-    user = {
-        name = "Alice",
-        profile = { age = 25 }
-    }
-})
-
--- Shallow watching
-local stopShallow = HybridReactive.watchReactive(obj, function(key, newValue, oldValue, path)
-    print("Shallow watch:", key, path)
-end, true)  -- shallow = true
-
--- Deep watching
-local stopDeep = HybridReactive.watchReactive(obj, function(key, newValue, oldValue, path)
-    print("Deep watch:", key, path)
-end, false)  -- shallow = false
-
--- Replace entire user object (both will trigger)
-obj.user = { name: "Bob", profile: { age: 30 } }
--- Output:
--- Shallow watch: user user
--- Deep watch: user user
-
--- Modify nested property (only deep watch will trigger)
-obj.user.name = "Charlie"
--- Output:
--- Deep watch: name user.name
-
-obj.user.profile.age = 35
--- Output:
--- Deep watch: age user.profile.age
-
-stopShallow()
-stopDeep()
-```
-
-#### Same Property Names at Different Levels
-
-`watchReactive` can accurately distinguish same property names at different levels:
-
-```lua
-local obj = HybridReactive.reactive({
-    name = "root-name",           -- Root level name
-    user = {
-        name = "user-name",       -- User level name
-        profile = {
-            name = "profile-name" -- Profile level name
-        }
-    }
-})
-
-HybridReactive.watchReactive(obj, function(key, newValue, oldValue, path)
-    print(string.format("Property '%s' at path '%s' changed", key, path))
-end, false)
-
-obj.name = "new-root-name"                    -- Output: Property 'name' at path 'name' changed
-obj.user.name = "new-user-name"              -- Output: Property 'name' at path 'user.name' changed
-obj.user.profile.name = "new-profile-name"   -- Output: Property 'name' at path 'user.profile.name' changed
-```
-
-### Advanced Features
+## Advanced Features
 
 #### Batch Updates
 
@@ -383,94 +110,6 @@ count(10)
 multiplier(3)
 endBatch() -- Output: Result: 30
 ```
-
-### v3.0.0 New Features
-
-#### Type Detection Functions
-
-v3.0.0 added runtime type detection functions to check if a value is a specific reactive primitive:
-
-```lua
-local reactive = require("reactive")
-local signal = reactive.signal
-local computed = reactive.computed
-local effect = reactive.effect
-local effectScope = reactive.effectScope
-
--- Create reactive primitives
-local count = signal(0)
-local doubled = computed(function() return count() * 2 end)
-local stopEffect = effect(function() print(count()) end)
-local stopScope = effectScope(function() end)
-
--- Type detection
-print(reactive.isSignal(count))        -- true
-print(reactive.isSignal(doubled))      -- false
-
-print(reactive.isComputed(doubled))    -- true
-print(reactive.isComputed(count))      -- false
-
-print(reactive.isEffect(stopEffect))   -- true
-print(reactive.isEffectScope(stopScope)) -- true
-```
-
-#### Querying Reactive Context State
-
-v3.0.0 added functions to query the current reactive context:
-
-```lua
-local reactive = require("reactive")
-local signal = reactive.signal
-local effect = reactive.effect
-
--- Get batch update depth
-print(reactive.getBatchDepth())  -- 0
-
-reactive.startBatch()
-print(reactive.getBatchDepth())  -- 1
-
-reactive.startBatch()
-print(reactive.getBatchDepth())  -- 2
-
-reactive.endBatch()
-print(reactive.getBatchDepth())  -- 1
-
-reactive.endBatch()
-print(reactive.getBatchDepth())  -- 0
-
--- Get current active subscriber
-local count = signal(0)
-print(reactive.getActiveSub() == nil)  -- true
-
-effect(function()
-    count()
-    -- Inside effect, getActiveSub returns current effect
-    local sub = reactive.getActiveSub()
-    print(sub ~= nil)  -- true
-end)
-
--- Outside effect
-print(reactive.getActiveSub() == nil)  -- true
-```
-
-#### API Renames
-
-For clearer semantics, v3.0.0 renamed some APIs:
-
-```lua
--- v2.0.7 (old API)
-local prevSub = reactive.setCurrentSub(nil)
-reactive.setCurrentSub(prevSub)
-
--- v3.0.0 (new API)
-local prevSub = reactive.setActiveSub(nil)
-reactive.setActiveSub(prevSub)
-```
-
-> ⚠️ **Important**: `pauseTracking`/`resumeTracking` and `setCurrentScope`/`getCurrentScope` have been removed in v3.0.0.
-> To pause tracking, use `setActiveSub(nil)` instead.
-
-
 
 The system uses the following techniques to implement reactivity:
 
@@ -515,118 +154,137 @@ Each link node contains the following fields:
 
 ### Doubly Linked List Diagram
 
-The linked list structure in the system can be represented as follows:
+**Core Principle**: Each Link node exists in two lists simultaneously:
+- **Subscriber Chain (Vertical)**: Links all subscribers downward from dependency source (Signal/Computed)
+- **Dependency Chain (Horizontal)**: Links all dependency sources rightward from subscriber (Effect/Computed)
 
-```
-Dependency Relationship Structure:
+This design achieves O(1) dependency add/remove and efficient notification propagation.
 
-+-------------+          +--------------+          +--------------+
-|    Signal   |          |   Computed   |          |    Effect    |
-| (Data Source)|         | (Derived Value)|        | (Side Effect) |
-+-------------+          +--------------+          +--------------+
-       ^                        ^                         ^
-       |                        |                         |
-       |                        |                         |
-       v                        v                         v
-+-----------------+    +-----------------+    +-----------------+
-|Subscriber Chain |    |Subscriber Chain |    |Subscriber Chain |
-|   (Vertical)    |    |   (Vertical)    |    |   (Vertical)    |
-+-----------------+    +-----------------+    +-----------------+
-       ^                        ^                         ^
-       |                        |                         |
-       |                        |                         |
-+======================================================================================================================+
-|                                            Link Node                                                                 |
-+======================================================================================================================+
-       |                        |                         |
-       |                        |                         |
-       v                        v                         v
-+-----------------+    +-----------------+    +-----------------+
-| Dependency Chain|    | Dependency Chain|    | Dependency Chain|
-|  (Horizontal)   |    |  (Horizontal)   |    |  (Horizontal)   |
-+-----------------+    +-----------------+    +-----------------+
+```mermaid
+graph TB
+    subgraph "Doubly Linked List Structure"
+        Signal["Signal<br/>(Data Source)"]
+        Computed["Computed<br/>(Derived)"]
+        Effect["Effect<br/>(Side Effect)"]
+        
+        Signal -->|subs| Link1["Link Node 1"]
+        Link1 -->|nextSub| Link2["Link Node 2"]
+        
+        Computed -->|subs| Link3["Link Node 3"]
+        
+        Effect -->|deps| Link4["Link Node 4"]
+        Link4 -->|nextDep| Link5["Link Node 5"]
+        
+        Link1 -.->|sub points to| Effect
+        Link2 -.->|sub points to| Effect
+        Link3 -.->|sub points to| Effect
+        
+        Link4 -.->|dep points to| Signal
+        Link5 -.->|dep points to| Computed
+    end
+    
+    style Signal fill:#e1f5ff
+    style Computed fill:#fff3e0
+    style Effect fill:#f3e5f5
+    style Link1 fill:#c8e6c9
+    style Link2 fill:#c8e6c9
+    style Link3 fill:#c8e6c9
+    style Link4 fill:#ffccbc
+    style Link5 fill:#ffccbc
 ```
+
+**How it works**:
+1. **Dependency Collection**: Effect executes → accesses Signal → creates Link node → adds to both Signal's subs list and Effect's deps list
+2. **Notification Propagation**: Signal changes → traverses subs list → notifies all subscribers to execute
+3. **Dependency Cleanup**: Before Effect re-executes → traverses deps list → removes itself from old dependencies
 
 ### Link Process
 
-When a reactive object (like Signal or Computed) is accessed, the system establishes a dependency relationship between it and the currently active effect:
+**Principle**: When Effect executes and accesses Signal, the system automatically establishes dependency relationship.
 
-1. Checks for duplicate dependencies to avoid adding the same dependency multiple times
-2. Handles circular dependency cases to prevent infinite recursion
-3. Creates a new link node and inserts it into both chains
-4. Updates the previous and next pointers of the doubly-linked lists to ensure the complete list structure
-
+```mermaid
+sequenceDiagram
+    participant E as Effect
+    participant S as Signal
+    participant L as Link Node
+    
+    Note over E,S: Initial state: No connection
+    E->>S: Access Signal value
+    S->>S: Detect activeSub=Effect
+    S->>L: Create new Link node
+    L->>S: Add to Signal.subs list
+    L->>E: Add to Effect.deps list
+    Note over E,S: Dependency established
+    
+    rect rgb(200, 230, 201)
+        Note right of L: Link structure:<br/>dep=Signal<br/>sub=Effect<br/>bidirectional pointers
+    end
 ```
-Initial state:
-Signal A     Effect 1
- subs=nil     deps=nil
- 
-Execute reactive.link(Signal A, Effect 1):
 
-Create new link node:
-+-------------------+
-| Link {            |
-|   dep = Signal A  |
-|   sub = Effect 1  |
-|   prevSub = nil   |
-|   nextSub = nil   |
-|   prevDep = nil   |
-|   nextDep = nil   |
-| }                 |
-+-------------------+
-
-Update Signal A and Effect 1:
-Signal A            Effect 1
- subs=Link           deps=Link
- subsTail=Link       depsTail=Link
-```
+**Key Steps**:
+1. **Detect Access**: When Signal is read, check global activeSub
+2. **Create Link**: If activeSub exists, create Link node connecting them
+3. **Prevent Duplicates**: Check if dependency already exists to avoid duplication
+4. **Bidirectional Connection**: Link added to both Signal.subs and Effect.deps
 
 ### Unlink Process
 
-When a dependency relationship is no longer needed (e.g., when an effect is cleaned up or re-executed without needing a specific dependency), the system removes these relationships:
+**Principle**: When Effect re-executes or is destroyed, old dependency relationships need to be cleaned up.
 
-1. Removes the link node from the dependency chain (horizontal direction)
-2. Removes the link node from the subscriber chain (vertical direction)
-3. Handles special cases, like cleanup when the last subscriber is removed
-
+```mermaid
+sequenceDiagram
+    participant E as Effect
+    participant L as Link Node
+    participant S as Signal
+    
+    Note over E,S: Established dependency
+    E->>E: Re-execute/Destroy
+    E->>L: Traverse deps list
+    L->>S: Remove from Signal.subs
+    L->>E: Remove from Effect.deps
+    L->>L: Destroy Link node
+    Note over E,S: Dependency cleaned up
 ```
-Initial state:
-Signal A                 Effect 1
- subs=Link                deps=Link
- subsTail=Link            depsTail=Link
- 
-   +-------------------+
-   | Link {            |
-   |   dep = Signal A  |
-   |   sub = Effect 1  |
-   |   prevSub = nil   |
-   |   nextSub = nil   |
-   |   prevDep = nil   |
-   |   nextDep = nil   |
-   | }                 |
-   +-------------------+
 
-Execute reactive.unlink(Link, Effect 1):
-
-Remove link:
-Signal A           Effect 1
- subs=nil           deps=nil
- subsTail=nil       depsTail=nil
-```
+**Key Steps**:
+1. **Trigger Timing**: Before Effect re-executes or when destroyed
+2. **Traverse Dependencies**: Find all Link nodes through deps list
+3. **Bidirectional Removal**: Remove from both Signal.subs and Effect.deps
+4. **Memory Release**: Link node is garbage collected
 
 ### Complex Scenario Example
 
-In practical applications, the dependency relationship network can be very complex:
+**Principle**: The reactive system supports multi-level dependency relationships, forming a Directed Acyclic Graph (DAG).
 
+```mermaid
+graph LR
+    A[Signal A] -->|notify| E1[Effect 1]
+    A -->|notify| C[Computed C]
+    E1 -->|read| B[Signal B]
+    B -->|notify| E2[Effect 2]
+    B -->|notify| C
+    C -->|notify| E3[Effect 3]
+    C -->|read| D[Signal D]
+    
+    style A fill:#e1f5ff
+    style B fill:#e1f5ff
+    style D fill:#e1f5ff
+    style C fill:#fff3e0
+    style E1 fill:#f3e5f5
+    style E2 fill:#f3e5f5
+    style E3 fill:#f3e5f5
 ```
-Signal A ---> Effect 1 ---> Signal B ---> Effect 2
-    |                           |
-    |                           v
-    +----------------------> Computed C ---> Effect 3
-                               |
-                               v
-                            Signal D
-```
+
+**Data Flow**:
+1. **Signal A** changes → triggers **Effect 1** and **Computed C**
+2. **Effect 1** executes → may modify **Signal B**
+3. **Signal B** changes → triggers **Effect 2** and **Computed C** (again)
+4. **Computed C** updates → triggers **Effect 3**
+
+**Optimization Mechanisms**:
+- **Dirty Checking**: Computed only recalculates when dependencies change
+- **Batch Updates**: Multiple Signals change simultaneously, Effect executes only once
+- **Topological Sort**: Ensures dependencies update in correct order, avoiding redundant calculations
 
 This complex dependency relationship is efficiently managed through the doubly-linked list structure, achieving O(1) time complexity for dependency operations.
 
@@ -734,8 +392,6 @@ SECTION 2: Path Tracking and Same Key Tests
 
 ## Complete API Reference
 
-### Low-level Reactive System (reactive.lua) - v3.0.0
-
 ```lua
 local reactive = require("reactive")
 
@@ -749,171 +405,17 @@ local effectScope = reactive.effectScope -- Create effect scope
 local startBatch = reactive.startBatch   -- Start batch updates
 local endBatch = reactive.endBatch       -- End batch updates and flush
 
--- Advanced control API (v3.0.0)
-local setActiveSub = reactive.setActiveSub       -- Set current active subscriber (v3.0.0 renamed)
-local getActiveSub = reactive.getActiveSub       -- Get current active subscriber (v3.0.0 renamed)
-local getBatchDepth = reactive.getBatchDepth     -- Get batch update depth (v3.0.0 new)
+-- Advanced control API
+local setActiveSub = reactive.setActiveSub       -- Set current active subscriber
+local getActiveSub = reactive.getActiveSub       -- Get current active subscriber
+local getBatchDepth = reactive.getBatchDepth     -- Get batch update depth
 
--- Type detection API (v3.0.0 new)
+-- Type detection API
 local isSignal = reactive.isSignal               -- Check if value is Signal
 local isComputed = reactive.isComputed           -- Check if value is Computed
 local isEffect = reactive.isEffect               -- Check if value is Effect
 local isEffectScope = reactive.isEffectScope     -- Check if value is EffectScope
-
--- Removed APIs (v3.0.0)
--- ❌ pauseTracking - Use setActiveSub(nil) instead
--- ❌ resumeTracking - Use setActiveSub(prevSub) instead
--- ❌ setCurrentScope - Removed
--- ❌ getCurrentScope - Removed
-
-### HybridReactive - Vue.js Style API (v3.0.0)
-
-```lua
-local HybridReactive = require("HybridReactive")
-
--- Reactive data creation
-local ref = HybridReactive.ref           -- Create reactive references
-local reactive = HybridReactive.reactive -- Create reactive objects
-local computed = HybridReactive.computed -- Create computed properties
-
--- Watch API
-local watch = HybridReactive.watch             -- Generic watch function (alias for effect)
-local watchRef = HybridReactive.watchRef       -- Watch ref objects specifically
-local watchReactive = HybridReactive.watchReactive -- Watch reactive objects specifically
-
--- Utility functions
-local isRef = HybridReactive.isRef           -- Check if value is a ref object
-local isReactive = HybridReactive.isReactive -- Check if value is a reactive object
-
--- Batch operations (exposed from reactive module)
-local startBatch = HybridReactive.startBatch -- Start batch updates
-local endBatch = HybridReactive.endBatch     -- End batch updates
 ```
-
-### v3.0.0 Technical Features
-
-#### Type Marker System
-```lua
--- Unique type markers
-local SIGNAL_MARKER = {}
-local COMPUTED_MARKER = {}
-local EFFECT_MARKER = {}
-local EFFECTSCOPE_MARKER = {}
-
--- Type detection implementation
-function reactive.isSignal(obj)
-    if type(obj) ~= "function" then return false end
-    
-    -- Check marker in upvalue using debug library
-    local i = 1
-    while true do
-        local name, value = debug.getupvalue(obj, i)
-        if not name then break end
-        if name == "obj" then
-            return value._marker == SIGNAL_MARKER
-        end
-        i = i + 1
-    end
-    return false
-end
-```
-
-#### Optimized Computed Initialization
-```lua
--- v3.0.0: Removed Dirty flag, optimized first computation path
-function reactive.computed(getter)
-    local obj = {
-        _getter = getter,
-        _value = nil,
-        _flags = 0,  -- v3.0.0: Initialize to 0, no longer includes Dirty flag
-        _marker = COMPUTED_MARKER
-    }
-    
-    -- First access directly computes
-    return function()
-        if obj._flags == 0 then
-            -- Fast path: first computation
-            local success, result = pcall(updateComputed, obj)
-            if success then
-                return result
-            end
-        end
-        -- ...
-    end
-end
-```
-
-#### Inlined Tracking Optimization
-```lua
--- v3.0.0: Removed startTracking/endTracking, directly inlined tracking logic
-function run(obj)
-    -- Directly inline check and set
-    local shouldCleanup = obj._flags & RunningFlags ~= 0
-    if shouldCleanup then
-        obj._flags = obj._flags | NotifiedFlag
-    end
-    
-    if shouldCleanup then
-        purgeDeps(obj)
-    end
-    
-    -- Set active subscriber
-    local prevSub = g_activeSub
-    g_activeSub = obj
-    
-    -- Execute side effect
-    local status, err = pcall(obj._fn)
-    
-    -- Restore previous subscriber
-    g_activeSub = prevSub
-    
-    -- Clear flags
-    obj._flags = obj._flags & bit.bnot(RunningFlags | NotifiedFlag)
-end
-```
-
-
-## HybridReactive Feature Summary
-
-### Core Advantages
-
-1. **Vue.js Style API**: Provides familiar `ref`, `reactive`, `computed` APIs
-
-## HybridReactive Feature Summary
-
-### Core Advantages
-
-1. **Vue.js Style API**: Provides familiar `ref`, `reactive`, `computed` APIs
-2. **Deep Reactivity**: Default support for deep nested object reactive conversion
-3. **Precise Watching**: `watchReactive` provides precise property change watching and path tracking
-4. **High Performance**: Based on efficient doubly-linked list dependency management system
-5. **Type Safety**: Strict type checking and error handling
-6. **Memory Safety**: Automatic cleanup of unused dependency relationships
-
-### v3.0.0 Enhancements
-
-- **Runtime Type Detection**: Added `isSignal`, `isComputed`, `isEffect`, `isEffectScope` functions
-- **Enhanced Context Queries**: Added `getBatchDepth` and `getActiveSub` for better introspection
-- **Optimized Performance**: Inlined tracking logic and optimized computed initialization
-- **Cleaner API Surface**: Renamed APIs for clarity, removed deprecated functions
-- **Cross-Language Portability**: Lua implementation enables usage in game engines and embedded systems
-- **Dual API Architecture**: Provides both low-level primitives and high-level Vue.js-style APIs
-
-### Use Cases
-
-- **State Management**: State management and data flow control for complex applications
-- **Data Binding**: Implementing two-way data binding between data and views
-- **Reactive Computing**: Automatic computation and updates based on data changes
-- **Event Systems**: Building event-driven systems based on data changes
-- **Caching Systems**: Implementing smart caching and dependency invalidation mechanisms
-
-### Best Practices
-
-1. **Proper use of deep/shallow reactivity**: Choose appropriate reactivity depth based on needs
-2. **Utilize path information**: Use `watchReactive`'s path parameter for precise change handling
-3. **Timely cleanup of watchers**: Use returned stop functions to cleanup unnecessary watchers
-4. **Batch update optimization**: Use `startBatch`/`endBatch` for performance when making many updates
-5. **Avoid circular dependencies**: Design reasonable data structures to avoid complex circular dependencies
 
 ## License
 
