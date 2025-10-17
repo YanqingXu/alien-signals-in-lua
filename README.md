@@ -1,6 +1,6 @@
 # Alien Signals - Lua响应式编程系统
 
-**版本: 3.0.0** - 兼容 alien-signals v3.0.0
+**版本: 3.0.1** - 兼容 alien-signals v3.0.1
 
 [English README](README.en.md)
 
@@ -9,6 +9,17 @@
 本项目移植自[stackblitz/alien-signals](https://github.com/stackblitz/alien-signals)，是原TypeScript版本响应式系统的Lua实现。
 
 Alien Signals是一个高效的响应式编程系统，它通过简洁而强大的API，为应用提供自动依赖追踪和响应式数据流管理能力。
+
+### 3.0.1 版本更新 🔄
+
+- **Signal属性重命名**: `previousValue/value` → `currentValue/pendingValue` (更清晰的语义)
+- **Computed初始化优化**: 创建时立即标记为Dirty，移除首次访问快速路径
+- **简化清理逻辑**: effectScopeOper 使用 purgeDeps 统一清理依赖
+- **改进类型判断**: unwatched 使用 flags 检查代替属性检查
+- **API稳定性**: 所有公共API保持不变，升级无需修改代码
+- **完全兼容**: 与 alien-signals v3.0.1 完全同步
+
+> 📖 详细的更新日志请参阅 [CHANGELOG_3.0.1.md](CHANGELOG_3.0.1.md)
 
 ### 3.0.0 版本新特性 🎉
 
@@ -25,7 +36,6 @@ Alien Signals是一个高效的响应式编程系统，它通过简洁而强大�
   - 分离effectOper和effectScopeOper
   - 简化父子层级关系建立
   - 改进unwatched节点类型识别
-- **完全兼容**: 与 alien-signals v3.0.0 完全同步
 
 > 📖 详细的升级指南请参阅 [UPGRADE_TO_3.0.0.md](UPGRADE_TO_3.0.0.md)
 

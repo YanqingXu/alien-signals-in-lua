@@ -1,6 +1,6 @@
 # Alien Signals - Lua Reactive Programming System
 
-**Version: 3.0.0** - Compatible with alien-signals v3.0.0
+**Version: 3.0.1** - Compatible with alien-signals v3.0.1
 
 [简体中文 README](README.md)
 
@@ -10,7 +10,18 @@ This project is ported from [stackblitz/alien-signals](https://github.com/stackb
 
 Alien Signals is an efficient reactive programming system. It provides automatic dependency tracking and reactive data flow management capabilities for applications through a clean and powerful API.
 
-### New Features in v3.0.0
+### Updates in v3.0.1 🔄
+
+- **Signal Property Rename**: `previousValue/value` → `currentValue/pendingValue` (clearer semantics)
+- **Computed Initialization**: Mark as Dirty on creation, removed first access fast path
+- **Simplified Cleanup**: effectScopeOper now uses purgeDeps for unified dependency cleanup
+- **Improved Type Checking**: unwatched function uses flags check instead of property checks
+- **API Stability**: All public APIs remain unchanged, upgrade requires no code changes
+- **Fully Compatible**: Fully synchronized with alien-signals v3.0.1
+
+> 📖 For detailed changelog, see [CHANGELOG_3.0.1.md](CHANGELOG_3.0.1.md)
+
+### New Features in v3.0.0 🎉
 
 - **Type Detection Functions**: Added runtime type checking functions - `isSignal`, `isComputed`, `isEffect`, `isEffectScope`
 - **New Getters**: Added `getBatchDepth` and `getActiveSub` for querying reactive context state
@@ -21,7 +32,7 @@ Alien Signals is an efficient reactive programming system. It provides automatic
 - **Link Enhancement**: Added third parameter support to `link` function for more flexible dependency management
 - **Pending Flag Cleanup**: Inlined pending flag clearing logic for reduced function call overhead
 
-> ⚠️ **Breaking Changes**: This is a major version update. Please refer to [UPGRADE_TO_3.0.0.md](UPGRADE_TO_3.0.0.md) for migration guide.
+> ⚠️ **Breaking Changes**: v3.0.0 was a major version update. Please refer to [UPGRADE_TO_3.0.0.md](UPGRADE_TO_3.0.0.md) for migration guide.
 
 ## Core Concepts
 

@@ -2,8 +2,8 @@
  * Alien Signals - A reactive programming system for Lua
  * Alien Signals - Lua 响应式编程系统
  *
- * Version: 3.0.0 (compatible with alien-signals v3.0.0)
- * 版本: 3.0.0 (兼容 alien-signals v3.0.0)
+ * Version: 3.0.1 (compatible with alien-signals v3.0.1)
+ * 版本: 3.0.1 (兼容 alien-signals v3.0.1)
  *
  * Derived from https://github.com/stackblitz/alien-signals
  * 源自 https://github.com/stackblitz/alien-signals
@@ -893,13 +893,13 @@ function reactive.isValidLink(checkLink, sub)
     return false
 end
 
-function reactive.updateSignal(signal, value)
+function reactive.updateSignal(signal)
     signal.flags = ReactiveFlags.Mutable
-    if signal.previousValue == value then
+    if signal.currentValue == signal.pendingValue then
         return false
     end
 
-    signal.previousValue = value
+    signal.currentValue = signal.pendingValue
     return true
 end
 
@@ -953,7 +953,7 @@ function reactive.update(signal)
     end
 
     -- For signals, update directly
-    return reactive.updateSignal(signal, signal.value)
+    return reactive.updateSignal(signal)
 end
 
 --[[
@@ -992,9 +992,9 @@ function reactive.unwatched(node)
         -- For effects, clean up
         -- 对于副作用，进行清理
         reactive.effectOper(node)
-    elseif not node.previousValue then
-        -- For effect scopes (no getter, no fn, no previousValue), clean up
-        -- 对于副作用作用域（无getter、无fn、无previousValue），进行清理
+    elseif bit.band(node.flags, ReactiveFlags.Mutable) == 0 then
+        -- For effect scopes (flag check: not Mutable), clean up
+        -- 对于副作用作用域（标志检查：不是 Mutable），进行清理
         -- Inline effectScopeOper logic
         -- 内联effectScopeOper逻辑
         local dep = node.deps
@@ -1067,8 +1067,8 @@ local function signalOper(this, newValue)
     if newValue ~= nil then
         -- Set operation (when called with a value)
         -- 设置操作（当使用值调用时）
-        if newValue ~= this.value then
-            this.value = newValue
+        if newValue ~= this.pendingValue then
+            this.pendingValue = newValue
             this.flags = bit.bor(ReactiveFlags.Mutable, ReactiveFlags.Dirty)
 
             -- Notify subscribers if any
@@ -1086,11 +1086,10 @@ local function signalOper(this, newValue)
     else
         -- Get operation (when called without arguments)
         -- 获取操作（当不带参数调用时）
-        local value = this.value
         -- Check if the signal needs to be updated (for signals within effects)
         -- 检查信号是否需要更新（对于副作用中的信号）
         if bit.band(this.flags, ReactiveFlags.Dirty) > 0 then
-            if reactive.updateSignal(this, value) then
+            if reactive.updateSignal(this) then
                 local subs = this.subs
                 if subs then
                     reactive.shallowPropagate(subs)
@@ -1100,11 +1099,16 @@ local function signalOper(this, newValue)
 
         -- Register this signal as a dependency of the current subscriber, if any
         -- 如果有当前订阅者，将此信号注册为其依赖
-        if g_activeSub then
-            reactive.link(this, g_activeSub)
+        local sub = g_activeSub
+        while sub do
+            if bit.band(sub.flags, 3) > 0 then  -- Mutable | Watching
+                reactive.link(this, sub, g_currentVersion)
+                break
+            end
+            sub = sub.subs and sub.subs.sub or nil
         end
 
-        return value
+        return this.currentValue
     end
 end
 
@@ -1129,8 +1133,8 @@ end
 local function signal(initialValue)
     local s = {
         __type = SIGNAL_MARKER,    -- Type marker for isSignal / isSignal的类型标记
-        previousValue = initialValue, -- For change detection / 用于变更检测
-        value = initialValue,         -- Current value / 当前值
+        currentValue = initialValue, -- Current committed value / 当前已提交的值
+        pendingValue = initialValue, -- Pending value to be committed / 待提交的值
         subs = nil,                   -- Linked list of subscribers (head) / 订阅者链表（头部）
         subsTail = nil,               -- Linked list of subscribers (tail) / 订阅者链表（尾部）
         flags = ReactiveFlags.Mutable, -- State flags / 状态标志
@@ -1191,25 +1195,17 @@ local function computedOper(this)
                 reactive.shallowPropagate(subs)
             end
         end
-    elseif flags == 0 then
-        -- Fast path for first time access
-        -- 首次访问的快速路径
-        this.flags = ReactiveFlags.Mutable
-        local prevSub = reactive.setActiveSub(this)
-        local result, value = pcall(this.getter)
-        if result then
-            this.value = value
-        else
-            print("Error in computed: " .. value)
-        end
-        g_activeSub = prevSub
     end
 
     -- Register this computed as a dependency of the current subscriber
     -- 将此计算值注册为当前订阅者的依赖
     local sub = g_activeSub
-    if sub then
-        reactive.link(this, sub, g_currentVersion)
+    while sub do
+        if bit.band(sub.flags, 3) > 0 then  -- Mutable | Watching
+            reactive.link(this, sub, g_currentVersion)
+            break
+        end
+        sub = sub.subs and sub.subs.sub or nil
     end
 
     return this.value
@@ -1237,7 +1233,7 @@ local function computed(getter)
         subsTail = nil,            -- Linked list of subscribers (tail) / 订阅者链表（尾部）
         deps = nil,                -- Dependencies linked list (head) / 依赖链表（头部）
         depsTail = nil,            -- Dependencies linked list (tail) / 依赖链表（尾部）
-        flags = ReactiveFlags.None, -- Initially no flags (will be set on first access) / 初始无标志（首次访问时设置）
+        flags = 17,                -- Mutable | Dirty (initialized as dirty) / Mutable | Dirty（初始化为脏）
         getter = getter,           -- Function to compute the value / 计算值的函数
     }
 
@@ -1268,12 +1264,14 @@ end
  * 2. 如果有的话，从父作用域取消链接
 ]]
 local function effectScopeOper(this)
-    -- Unlink all dependencies
-    -- 取消所有依赖的链接
-    local dep = this.deps
-    while(dep) do
-        dep = reactive.unlink(dep, this)
-    end
+    -- Clear depsTail and flags
+    -- 清除 depsTail 和 flags
+    this.depsTail = nil
+    this.flags = ReactiveFlags.None
+    
+    -- Unlink all dependencies using purgeDeps
+    -- 使用 purgeDeps 取消所有依赖的链接
+    reactive.purgeDeps(this)
 
     -- If this effect/scope is a dependency for other effects, unlink it
     -- 如果此副作用/作用域是其他副作用的依赖，取消其链接
