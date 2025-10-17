@@ -859,6 +859,10 @@ function reactive.checkDirty(link, sub)
             break
         end
     end
+
+    -- Should never reach here in normal execution, but return false for safety
+    -- 正常执行不应该到达这里，但为了安全返回false
+    return false
 end
 
 function reactive.shallowPropagate(link)
@@ -1268,7 +1272,7 @@ local function effectScopeOper(this)
     -- 清除 depsTail 和 flags
     this.depsTail = nil
     this.flags = ReactiveFlags.None
-    
+
     -- Unlink all dependencies using purgeDeps
     -- 使用 purgeDeps 取消所有依赖的链接
     reactive.purgeDeps(this)
