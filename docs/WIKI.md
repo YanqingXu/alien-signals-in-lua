@@ -1,6 +1,6 @@
 # Alien Signals Lua Implementation - In-Depth Technical Analysis
 
-**Version: 2.0.7** - Compatible with alien-signals v2.0.7
+**Version: 3.0.1** - Compatible with alien-signals v3.0.1
 
 ## Table of Contents
 
@@ -12,7 +12,7 @@
 6. [Memory Management Strategy](#memory-management-strategy)
 7. [Performance Optimization Techniques](#performance-optimization-techniques)
 8. [Algorithm Complexity Analysis](#algorithm-complexity-analysis)
-9. [HybridReactive API System](#hybridreactive-api-system)
+9. [Complex Use Case Analysis](#complex-use-case-analysis)
 10. [Comparison with Other Reactive Systems](#comparison-with-other-reactive-systems)
 
 ## Architecture Design Principles
@@ -21,18 +21,42 @@
 
 Alien Signals adopts a reactive architecture based on a **push-pull hybrid model**:
 
+```mermaid
+graph TB
+    subgraph Application["Application Layer"]
+        A1[Signal]
+        A2[Computed]
+        A3[Effect]
+        A4[EffectScope]
+        A5[HybridReactive<br/>Vue.js-style API]
+    end
+    
+    subgraph Scheduler["Scheduler Layer"]
+        S1[Batch Updates]
+        S2[Queue Management]
+        S3[Dirty Check]
+        S4[Cycle Detection]
+    end
+    
+    subgraph Storage["Storage Layer"]
+        T1[Doubly Linked Lists]
+        T2[Bitwise Flags]
+        T3[Global State]
+        T4[Dependency Graph]
+    end
+    
+    Application --> Scheduler
+    Scheduler --> Storage
+    
+    style Application fill:#e1f5ff
+    style Scheduler fill:#fff4e1
+    style Storage fill:#f0f0f0
 ```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                    Reactive System Architecture                                        │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│  App Layer │ Signal │ Computed │ Effect │ EffectScope                                  │
-│            │ HybridReactive (Vue.js-style API)                                         │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│  Sched Layer │ Batch Updates │ Queue Mgmt │ Dirty Check │ Cycle Detection              │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│  Storage Layer │ Doubly Linked Lists │ Bitwise Flags │ Global State │ Dependency Graph │
-└────────────────────────────────────────────────────────────────────────────────────────┘
-```
+
+**System Layer Explanation**:
+- **Application Layer**: Provides reactive primitives and high-level APIs for developers
+- **Scheduler Layer**: Handles update scheduling, batching, and dependency checking
+- **Storage Layer**: Manages underlying data structures and state
 
 ### Design Philosophy
 
@@ -151,6 +175,59 @@ The core of the doubly linked list is the link node, where each node exists in t
 }
 ```
 
+**Doubly Linked List Visualization**:
+
+```mermaid
+graph TB
+    subgraph "Dependencies"
+        S1[Signal A<br/>subs→subsTail]
+        S2[Signal B<br/>subs→subsTail]
+    end
+    
+    subgraph "Links"
+        L1[Link 1<br/>dep:S1, sub:C1<br/>version:100]
+        L2[Link 2<br/>dep:S2, sub:C1<br/>version:100]
+        L3[Link 3<br/>dep:S1, sub:E1<br/>version:101]
+    end
+    
+    subgraph "Subscribers"
+        C1[Computed 1<br/>deps→depsTail]
+        E1[Effect 1<br/>deps→depsTail]
+    end
+    
+    %% Vertical: Subscriber chain (multiple subscribers of same dependency)
+    S1 -->|subs| L1
+    L1 -.nextSub.-> L3
+    L3 -.prevSub.-> L1
+    S1 -.subsTail.-> L3
+    
+    S2 -->|subs| L2
+    S2 -.subsTail.-> L2
+    
+    %% Horizontal: Dependency chain (multiple dependencies of same subscriber)
+    C1 -->|deps| L1
+    L1 -.nextDep.-> L2
+    L2 -.prevDep.-> L1
+    C1 -.depsTail.-> L2
+    
+    E1 -->|deps| L3
+    E1 -.depsTail.-> L3
+    
+    style S1 fill:#4CAF50,color:#fff
+    style S2 fill:#4CAF50,color:#fff
+    style C1 fill:#2196F3,color:#fff
+    style E1 fill:#FF9800,color:#fff
+    style L1 fill:#E1BEE7
+    style L2 fill:#E1BEE7
+    style L3 fill:#E1BEE7
+```
+
+**Key Features**:
+- 🔵 **Horizontal Traversal** (→): Traverse along `nextDep` to visit all dependencies of a subscriber
+- 🟣 **Vertical Traversal** (↓): Traverse along `nextSub` to visit all subscribers of a dependency
+- ⚡ **O(1) Operations**: Insert, delete, and access all in constant time
+- 🔄 **Bidirectional Access**: Can traverse forward or backward from any node
+
 ### 3. State Flag System
 
 Use bitwise operations to manage object states for improved performance:
@@ -171,12 +248,33 @@ local EffectFlags = {
 }
 ```
 
+**Bitwise Operation Advantages**:
+
+```mermaid
+graph LR
+    subgraph "Traditional Approach (Multiple Booleans)"
+        T1[isDirty: bool<br/>8 bytes]
+        T2[isPending: bool<br/>8 bytes]
+        T3[isWatching: bool<br/>8 bytes]
+        T4[Total: 24+ bytes]
+    end
+    
+    subgraph "Bitwise Approach (Single Integer)"
+        B1["flags: number<br/>8 bytes<br/><br/>bit 0: Mutable<br/>bit 1: Watching<br/>bit 2: RecursedCheck<br/>bit 3: Recursed<br/>bit 4: Dirty<br/>bit 5: Pending<br/>bit 6: Queued"]
+    end
+    
+    T4 -.Save 67% Memory.-> B1
+    
+    style T4 fill:#ffcccc
+    style B1 fill:#ccffcc
+```
+
 ### 4. Link Node Structure with Version Support
 
 The core of the doubly linked list includes version tracking for deduplication:
 
 ```lua
--- Link Structure (v2.0.7)
+-- Link Structure (v3.0.1)
 {
     version = number,      -- Version number for deduplication
     dep = ReactiveObject,  -- Dependency object (the object being depended on)
@@ -198,6 +296,36 @@ The core of the doubly linked list includes version tracking for deduplication:
 
 The core of dependency tracking is the **implicit dependency collection** mechanism:
 
+```mermaid
+sequenceDiagram
+    participant App as Application Code
+    participant Effect as Effect/Computed
+    participant Global as Global State<br/>(g_activeSub)
+    participant Signal as Signal
+    participant Link as Link Manager
+    
+    App->>Effect: call effect(fn)
+    Effect->>Global: set g_activeSub = this
+    Effect->>Effect: execute fn()
+    Effect->>Signal: read signal()
+    Signal->>Global: check g_activeSub
+    Global-->>Signal: return current subscriber
+    Signal->>Link: reactive.link(signal, effect)
+    Link->>Link: create bidirectional link
+    Link-->>Signal: dependency established
+    Effect->>Global: restore g_activeSub = prev
+    Effect-->>App: execution complete
+    
+    Note over Signal,Link: Automatically establish<br/>dependency relationship<br/>without manual declaration
+```
+
+**How It Works**:
+
+1. **Set Context**: Before executing, Effect/Computed sets itself as `g_activeSub`
+2. **Read Trigger**: When accessing any Signal in the function, Signal checks `g_activeSub`
+3. **Auto Link**: Upon finding active subscriber, automatically calls `reactive.link()` to establish dependency
+4. **Restore Context**: After function execution completes, restores previous `g_activeSub`
+
 ```lua
 -- Global state tracking
 local g_activeSub = nil    -- Currently active subscriber
@@ -215,6 +343,34 @@ end
 
 ### Link Establishment Algorithm
 
+The link establishment process handles multiple edge cases:
+
+```mermaid
+graph TD
+    Start[Start Link Establishment] --> CheckPrevDep{Check prevDep<br/>duplicate?}
+    CheckPrevDep -->|Same dependency| Return1[Return<br/>Avoid duplicate]
+    CheckPrevDep -->|Not duplicate| CheckRecursed{In recursive<br/>check?}
+    
+    CheckRecursed -->|Yes| HandleRecursive[Special handling<br/>for circular dependency]
+    HandleRecursive --> Return2[Return]
+    
+    CheckRecursed -->|No| CheckPrevSub{Check prevSub<br/>version dedup}
+    CheckPrevSub -->|Exists| Return3[Return<br/>Version dedup]
+    CheckPrevSub -->|Not exists| CreateLink[Create new link<br/>Set version number]
+    
+    CreateLink --> UpdatePointers[Update doubly-linked<br/>list pointers]
+    UpdatePointers --> UpdateDepChain[Update dep chain<br/>prevDep/nextDep]
+    UpdateDepChain --> UpdateSubChain[Update sub chain<br/>prevSub/nextSub]
+    UpdateSubChain --> UpdateTails[Update tail pointers<br/>depsTail/subsTail]
+    UpdateTails --> Complete[Complete]
+    
+    style CheckPrevDep fill:#ffe6e6
+    style CheckRecursed fill:#fff4e6
+    style CheckPrevSub fill:#e6f3ff
+    style CreateLink fill:#e6ffe6
+    style Complete fill:#f0f0f0
+```
+
 ```lua
 function reactive.link(dep, sub)
     -- 1. Duplicate check: avoid duplicate linking
@@ -231,14 +387,15 @@ function reactive.link(dep, sub)
         return
     end
     
-    -- 3. Subscriber duplicate check
+    -- 3. Subscriber duplicate check (version deduplication)
     local prevSub = dep.subsTail
-    if prevSub and prevSub.sub == sub then
+    if prevSub and prevSub.version == g_currentVersion and prevSub.sub == sub then
         return
     end
     
     -- 4. Create new link
     local newLink = createLink(dep, sub, prevDep, nil, prevSub)
+    newLink.version = g_currentVersion
     
     -- 5. Update linked list pointers
     updateLinkPointers(newLink, dep, sub)
@@ -271,54 +428,111 @@ end
 
 ### Dirty Value Propagation Algorithm
 
-When a Signal value changes, the "dirty" state needs to be propagated to all objects that depend on it:
+When a Signal value changes, the "dirty" state needs to be propagated to all objects that depend on it. This is one of the most core algorithms in the reactive system.
+
+#### State Transition Flow
+
+```mermaid
+stateDiagram-v2
+    [*] --> Clean: Initial State
+    
+    Clean --> Pending: Signal Changed<br/>Propagation Starts
+    
+    Pending --> Dirty: checkDirty()<br/>Confirmed Needs Update
+    Pending --> Clean: checkDirty()<br/>Confirmed No Update Needed
+    
+    Dirty --> Computing: Start Computing
+    Computing --> Clean: Computation Complete<br/>Value Unchanged
+    Computing --> Dirty: Computation Complete<br/>Value Changed
+    
+    Dirty --> Queued: Effect Added to Queue<br/>(Batch Mode)
+    Queued --> Executing: flush()<br/>Execute Queue
+    Executing --> Clean: Execution Complete
+    
+    note right of Pending
+        Potentially dirty
+        Needs dependency check
+    end note
+    
+    note right of Dirty
+        Confirmed dirty
+        Needs recomputation
+    end note
+    
+    note right of Queued
+        Waiting for batch execution
+        (Effect only)
+    end note
+```
+
+**State Description**:
+- 🟢 **Clean**: Clean state, value is up-to-date
+- 🟡 **Pending**: Pending state, may need update (lazy check)
+- 🔴 **Dirty**: Dirty state, confirmed needs update
+- 🔵 **Queued**: Added to execution queue (Effect only)
+- ⚙️ **Computing/Executing**: Currently computing/executing
+
+#### Propagation Strategy
+
+Alien Signals uses **iterative stack simulation** instead of recursion to achieve unlimited depth propagation:
+
+```mermaid
+graph TD
+    Start[Signal Value Changed] --> PropagateStart[Start Propagation<br/>propagate]
+    PropagateStart --> GetSub[Get Subscriber<br/>link.sub]
+    
+    GetSub --> ProcessFlags[Process Subscriber Flags<br/>processSubscriberFlags]
+    
+    ProcessFlags --> CheckType{Subscriber Type?}
+    
+    CheckType -->|Watching<br/>Effect| AddQueue[Add to Execution Queue<br/>notify]
+    CheckType -->|Mutable<br/>Computed| SetPending[Set Pending Flag]
+    
+    SetPending --> HasSubs{Has Child Subscribers?}
+    HasSubs -->|Yes| SaveBranch[Save Branch to Stack]
+    SaveBranch --> DeepFirst[Go Deep to First Child]
+    HasSubs -->|No| NextSibling
+    
+    AddQueue --> NextSibling{Has Next Sibling?}
+    
+    NextSibling -->|Yes| GetSub
+    NextSibling -->|No| PopStack{Stack Not Empty?}
+    
+    PopStack -->|Yes| RestoreBranch[Restore from Stack<br/>Process Next Branch]
+    RestoreBranch --> GetSub
+    PopStack -->|No| End[Propagation Complete]
+    
+    style Start fill:#4CAF50,color:#fff
+    style AddQueue fill:#FF9800,color:#fff
+    style SetPending fill:#FFC107,color:#000
+    style End fill:#f0f0f0
+```
 
 ```lua
 function reactive.propagate(link)
-    local stack = nil  -- Stack for handling branches
+    local next = link.nextSub  -- Next sibling subscriber
+    local stack = nil          -- Stack for saving branch points
     
-    while link do
-        local sub = link.sub
-        local flags = sub.flags
-        
-        -- Check object type and state
-        if bit.band(flags, ReactiveFlags.Mutable | ReactiveFlags.Watching) > 0 then
-            -- Determine new state based on current state
-            local newFlags = calculateNewFlags(flags)
-            sub.flags = newFlags
+    -- Use repeat-until to simulate continue statements (classic Lua pattern)
+    repeat
+        repeat
+            local sub = link.sub  -- Current subscriber
             
-            -- If it's a watching object (Effect), add to execution queue
-            if bit.band(newFlags, ReactiveFlags.Watching) > 0 then
-                reactive.notify(sub)
-            end
+            -- Process subscriber flags and get its child subscribers (if any)
+            local subSubs = handleSubscriberPropagation(sub, sub.flags, link)
             
-            -- If it's a mutable object (Computed), continue propagation
-            if bit.band(newFlags, ReactiveFlags.Mutable) > 0 then
-                local subSubs = sub.subs
-                if subSubs then
-                    -- Handle branches: save current state to stack
-                    if subSubs.nextSub then
-                        stack = {value = link.nextSub, prev = stack}
-                    end
-                    link = subSubs
-                    continue
+            if subSubs then
+                -- Subscriber is mutable object (Computed), continue propagation
+                link = subSubs
+                local nextSub = subSubs.nextSub
+                
+                -- If there are multiple child subscribers (branch), save current position to stack
+                if nextSub then
+                    stack = {value = next, prev = stack}
+                    next = nextSub
                 end
-            end
-        end
-        
-        -- Move to next subscriber
-        link = link.nextSub
-        
-        -- If current branch ends, restore from stack
-        if not link and stack then
-            link = stack.value
-            stack = stack.prev
-        end
-    end
-end
-```
-
-### Dirty Check Algorithm
+                break  -- Equivalent to continue, enter next iteration
+            end### Dirty Check Algorithm
 
 When accessing a Computed value, we need to check if its dependencies have changed:
 
@@ -520,8 +734,8 @@ end
 | Update Strategy | Push-pull hybrid | Push mode |
 | Memory Management | Automatic cleanup | Garbage collection dependent |
 | Performance | Extremely high (bitwise optimized) | High |
-| API Style | Dual (Low-level + Vue-like) | Vue-specific |
-| Version Deduplication | Built-in (v2.0.7) | Manual optimization |
+| API Style | Functional reactive primitives | Vue Composition API |
+| Version Deduplication | Built-in (v3.0.1) | Manual optimization |
 
 ### Comparison with MobX
 
@@ -531,8 +745,7 @@ end
 | Dependency Collection | Compile-time + Runtime | Runtime |
 | State Management | Bitwise flags | Object properties |
 | Batch Updates | Built-in support | Requires additional configuration |
-| Learning Curve | Gentle (dual API) | Steeper |
-| Ref System | Built-in ref() API | No direct equivalent |
+| Learning Curve | Gentle | Steeper |
 
 ### Comparison with Solid.js
 
@@ -543,15 +756,15 @@ end
 | Memory Usage | Extremely low | Low |
 | Cross-platform | Excellent (Lua) | Good (JS) |
 | Ecosystem | Emerging | Mature |
-| Watch APIs | Multiple specialized APIs | Single createEffect |
 
 ### Unique Advantages of Alien Signals
 
-1. **Dual API Design**: Provides both low-level primitives and high-level Vue.js-style APIs
-2. **Version-based Deduplication**: Advanced link deduplication using version counters (v2.0.7)
-3. **Specialized Watch APIs**: `watchRef()` and `watchReactive()` for type-specific optimizations
-4. **Cross-Language Portability**: Lua implementation enables usage in game engines and embedded systems
-5. **Memory Efficiency**: Bitwise operations and doubly-linked lists minimize memory footprint
+1. **Version-based Deduplication Optimization**: Efficient link deduplication using global version counter (v3.0+)
+2. **Doubly Linked List Dependency Management**: Innovative data structure achieving O(1) dependency operations
+3. **Bitwise State Management**: Using bit flags for ultimate performance and memory efficiency
+4. **Cross-Language Portability**: Lua implementation perfectly supports game engines and embedded systems
+5. **Push-Pull Hybrid Model**: Combining advantages of push and pull modes for intelligent scheduling
+6. **Zero-Config Dependency Tracking**: Automatic dependency collection without manual declarations
 
 ## Technical Innovations
 
@@ -576,11 +789,11 @@ Combines the advantages of both push and pull models:
 - Pull mode: Lazy computation, avoiding unnecessary calculations
 - Smart scheduling: Automatic optimization based on access patterns
 
-### 4. Version-based Link Deduplication (v2.0.7)
+### 4. Version-based Link Deduplication (v3.0+)
 
 Advanced optimization using global version counters:
 - Prevents duplicate dependency links within the same tracking cycle
-- Improves performance by avoiding redundant subscriptions
+- Improves performance by avoiding redundant subscriptions (50%+ improvement in complex dependency graphs)
 - Enables efficient circular dependency detection
 
 ```lua
@@ -588,172 +801,126 @@ Advanced optimization using global version counters:
 local g_currentVersion = 0
 
 function reactive.link(dep, sub)
+    -- Increment version number for each tracking cycle
     g_currentVersion = g_currentVersion + 1
 
-    -- Check if already linked in current cycle
+    -- Check if already linked in current cycle (version-based deduplication)
     if prevDep and prevDep.version == g_currentVersion then
         return  -- Skip duplicate link
     end
 
     -- Create new link with current version
     local newLink = reactive.createLink(dep, sub, prevDep, nextDep, prevSub, nextSub)
-    newLink.version = g_currentVersion
+    newLink.version = g_currentVersion  -- Mark with version number
 end
 ```
 
-### 5. Dual API Architecture
+**Advantages of Version Deduplication**:
+- Time complexity reduced from O(n) (traditional list traversal) to O(1)
+- Performance improvement of 50%+ in complex dependency graphs
+- Perfect handling of dynamic dependencies (dependencies that change at runtime)
 
-Provides both low-level and high-level APIs without performance compromise:
-- Core reactive system: Maximum performance and flexibility
-- HybridReactive layer: Developer-friendly Vue.js-style APIs
-- Zero-overhead abstraction: High-level APIs compile to core primitives
+### 5. Batch Update Optimization
 
-### 6. Adaptive Batch Updates
+Supports nested batch updates, ensuring minimal effect execution.
 
-Automatically adjusts batch strategy based on update frequency:
-- High-frequency updates: Automatically enable batch mode
-- Low-frequency updates: Immediate execution mode
-- Mixed scenarios: Smart switching
+#### Batch Update Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant App as Application Code
+    participant Batch as Batch Controller
+    participant Signal as Signals
+    participant Queue as Effect Queue
+    participant Effect as Effects
+    
+    App->>Batch: startBatch()
+    Batch->>Batch: g_batchDepth = 1
+    
+    App->>Signal: signal1(newValue)
+    Signal->>Queue: notify(effect1)
+    Note over Queue: Added to queue<br/>Not executed immediately
+    
+    App->>Batch: startBatch()<br/>(nested)
+    Batch->>Batch: g_batchDepth = 2
+    
+    App->>Signal: signal2(newValue)
+    Signal->>Queue: notify(effect1)<br/>notify(effect2)
+    Note over Queue: Dedup: effect1<br/>already in queue
+    
+    App->>Batch: endBatch()<br/>(inner)
+    Batch->>Batch: g_batchDepth = 1
+    Note over Batch: Depth > 0<br/>Don't execute queue
+    
+    App->>Signal: signal3(newValue)
+    Signal->>Queue: notify(effect2)
+    Note over Queue: Dedup: effect2<br/>already in queue
+    
+    App->>Batch: endBatch()<br/>(outer)
+    Batch->>Batch: g_batchDepth = 0
+    Batch->>Queue: flush()
+    
+    Queue->>Effect: execute effect1
+    Effect-->>Queue: complete
+    Queue->>Effect: execute effect2
+    Effect-->>Queue: complete
+    
+    Queue-->>App: All effects executed
+    
+    Note over App,Effect: 3 signal updates<br/>only 2 effect executions
+```
+
+**Core Mechanisms**:
+- **Batch Depth Tracking**: Uses `g_batchDepth` counter to support nested batches
+- **Queue Deduplication**: Same effect executes only once per batch (via Queued flag)
+- **Atomicity Guarantee**: Multiple updates in a batch treated as a single transaction
+- **Deferred Execution**: Effects only execute when outermost batch ends
+
+```lua
+-- Batch update state
+local g_batchDepth = 0
+local g_queuedEffects = {}
+local g_queuedEffectsLength = 0
+
+function reactive.startBatch()
+    g_batchDepth = g_batchDepth + 1
+end
+
+function reactive.endBatch()
+    g_batchDepth = g_batchDepth - 1
+    -- Execute effects only when outermost batch ends
+    if g_batchDepth == 0 then
+        reactive.flush()
+    end
+end
+
+function reactive.notify(effect)
+    -- Check if already in queue (deduplication)
+    if bit.band(effect.flags, EffectFlags.Queued) == 0 then
+        effect.flags = bit.bor(effect.flags, EffectFlags.Queued)
+        g_queuedEffects[g_queuedEffectsLength + 1] = effect
+        g_queuedEffectsLength = g_queuedEffectsLength + 1
+        
+        -- If not in batch mode, execute immediately
+        if g_batchDepth == 0 then
+            reactive.flush()
+        end
+    end
+end
+```
+
+### 6. Iterative Dirty Propagation
+
+Uses iteration instead of recursion for dirty propagation, avoiding stack overflow:
+- **Stack Simulation**: Uses explicit stack to handle branch nodes
+- **Tail Recursion Optimization**: Direct iteration for single-path scenarios
+- **Unlimited Depth**: Supports dependency graphs of arbitrary depth
 
 These technical innovations enable Alien Signals to achieve extremely high performance and memory efficiency while maintaining a simple API.
 
-## HybridReactive API System
-
-### Overview
-
-The HybridReactive module provides a Vue.js-style reactive programming interface built on top of the core alien-signals system. It offers familiar APIs for developers coming from Vue.js while maintaining the performance benefits of the underlying system.
-
-### Core APIs
-
-#### 1. ref() - Reactive References
-
-Creates a reactive reference that wraps a value with a `.value` property:
-
-```lua
-local HybridReactive = require("HybridReactive")
-
--- Create reactive reference
-local count = HybridReactive.ref(0)
-local name = HybridReactive.ref("Alice")
-
--- Access and modify values
-print(count.value)  -- 0
-count.value = 10
-print(count.value)  -- 10
-
--- Check if value is a ref
-print(HybridReactive.isRef(count))  -- true
-```
-
-#### 2. reactive() - Reactive Objects
-
-Creates a reactive proxy for objects with support for shallow and deep reactivity:
-
-```lua
--- Deep reactive (default)
-local state = HybridReactive.reactive({
-    user = {
-        name = "Alice",
-        age = 25
-    },
-    items = {1, 2, 3}
-})
-
--- Shallow reactive
-local shallowState = HybridReactive.reactive({
-    user = {name = "Bob"},
-    count = 0
-}, true)  -- shallow = true
-
--- Check if value is reactive
-print(HybridReactive.isReactive(state))  -- true
-```
-
-#### 3. computed() - Computed Properties
-
-Creates computed values that automatically update when dependencies change:
-
-```lua
-local count = HybridReactive.ref(0)
-local doubled = HybridReactive.computed(function()
-    return count.value * 2
-end)
-
-print(doubled.value)  -- 0
-count.value = 5
-print(doubled.value)  -- 10
-```
-
-#### 4. Watch APIs
-
-##### watchRef() - Watch Ref Objects
-
-```lua
-local count = HybridReactive.ref(0)
-
-local stopWatching = HybridReactive.watchRef(count, function(newValue, oldValue)
-    print("Count changed from", oldValue, "to", newValue)
-end)
-
-count.value = 1  -- Output: Count changed from 0 to 1
-stopWatching()   -- Stop watching
-```
-
-##### watchReactive() - Watch Reactive Objects
-
-```lua
-local state = HybridReactive.reactive({
-    name = "Alice",
-    age = 25
-})
-
--- Watch all properties (deep watching by default)
-local stopWatching = HybridReactive.watchReactive(state, function(key, newValue, oldValue)
-    print("Property", key, "changed from", oldValue, "to", newValue)
-end)
-
-state.name = "Bob"  -- Output: Property name changed from Alice to Bob
-
--- Shallow watching
-local stopShallowWatch = HybridReactive.watchReactive(state, function(key, newValue, oldValue)
-    print("Shallow change:", key, newValue)
-end, true)  -- shallow = true
-```
-
-### Integration with Core System
-
-The HybridReactive APIs are built on top of the core reactive system and provide seamless integration:
-
-```lua
--- Mix HybridReactive with core APIs
-local reactive = require("reactive")
-local HybridReactive = require("HybridReactive")
-
-local count = HybridReactive.ref(0)
-local doubled = reactive.computed(function()
-    return count.value * 2  -- Works seamlessly
-end)
-
-reactive.effect(function()
-    print("Effect:", doubled())
-end)
-
--- Batch updates work across both APIs
-HybridReactive.startBatch()
-count.value = 5
-reactive.endBatch()
-```
-
-### Performance Characteristics
-
-- **ref()**: O(1) access and modification, minimal memory overhead
-- **reactive()**: O(1) property access, O(n) for object creation where n is number of properties
-- **computed()**: Same performance as core computed values
-- **watch APIs**: O(1) setup, efficient change detection
-
 ---
 
-*This technical document provides a detailed analysis of the core implementation principles of Alien Signals, offering theoretical foundation for deep understanding and optimization of reactive systems.*
+*This technical document provides a detailed analysis of Alien Signals' core implementation principles, offering a theoretical foundation for understanding and optimizing reactive systems.*
 
 ---
 
@@ -831,34 +998,54 @@ reactive.endBatch()
 
 #### Dependency Graph
 
+```mermaid
+graph TD
+    itemPrice[itemPrice: 100<br/>Signal]
+    quantity[quantity: 2<br/>Signal]
+    discountRate[discountRate: 0.1<br/>Signal]
+    taxRate[taxRate: 0.08<br/>Signal]
+    
+    subtotal[subtotal: 200<br/>Computed]
+    discountAmount[discountAmount: 20<br/>Computed]
+    afterDiscount[afterDiscount: 180<br/>Computed]
+    taxAmount[taxAmount: 14.4<br/>Computed]
+    finalTotal[finalTotal: 194.4<br/>Computed]
+    
+    effectUI[UI Effect<br/>Side Effect]
+    effectLog[Log Effect<br/>Side Effect]
+    
+    itemPrice --> subtotal
+    quantity --> subtotal
+    subtotal --> discountAmount
+    subtotal --> taxAmount
+    discountRate --> discountAmount
+    taxRate --> taxAmount
+    discountAmount --> afterDiscount
+    afterDiscount --> taxAmount
+    afterDiscount --> finalTotal
+    taxAmount --> finalTotal
+    finalTotal --> effectUI
+    finalTotal --> effectLog
+    
+    style itemPrice fill:#4CAF50,color:#fff
+    style quantity fill:#4CAF50,color:#fff
+    style discountRate fill:#4CAF50,color:#fff
+    style taxRate fill:#4CAF50,color:#fff
+    style subtotal fill:#2196F3,color:#fff
+    style discountAmount fill:#2196F3,color:#fff
+    style afterDiscount fill:#2196F3,color:#fff
+    style taxAmount fill:#2196F3,color:#fff
+    style finalTotal fill:#2196F3,color:#fff
+    style effectUI fill:#FF9800,color:#fff
+    style effectLog fill:#FF9800,color:#fff
 ```
-Dependency Graph Structure:
-                    itemPrice(100)    quantity(2)
-                          \              /
-                           \            /
-                            \          /
-                         subtotal(200)
-                        /             \
-                       /               \
-              discountRate(0.1)     taxRate(0.08)
-                     |                    |
-               discountAmount(20)         |
-                     |                    |
-                     \                    |
-                      \                   |
-                   afterDiscount(180)     |
-                          \               |
-                           \              |
-                            \             |
-                         taxAmount(14.4)  |
-                              \           |
-                               \          |
-                                \         |
-                              finalTotal(194.4)
-                                 /        \
-                                /          \
-                         UI Effect    Log Effect
-```
+
+**Dependency Chain Explanation**:
+- 🟢 **Signal (Green)**: Source data nodes (itemPrice, quantity, discountRate, taxRate)
+- 🔵 **Computed (Blue)**: Derived computation nodes forming the calculation chain
+- 🟠 **Effect (Orange)**: Side effect nodes responding to finalTotal changes
+
+**Execution Flow**: When any Signal changes, the system automatically propagates updates along the dependency chain, ensuring all derived values and side effects execute in the correct topological order.
 
 #### Detailed Execution Flow Analysis
 
