@@ -2,8 +2,8 @@
  * Alien Signals - A reactive programming system for Lua
  * Alien Signals - Lua 响应式编程系统
  *
- * Version: 3.0.1 (compatible with alien-signals v3.0.1)
- * 版本: 3.0.1 (兼容 alien-signals v3.0.1)
+ * Version: 3.0.3 (compatible with alien-signals v3.0.3)
+ * 版本: 3.0.3 (兼容 alien-signals v3.0.3)
  *
  * Derived from https://github.com/stackblitz/alien-signals
  * 源自 https://github.com/stackblitz/alien-signals
@@ -75,14 +75,6 @@ local ReactiveFlags = {
 }
 
 --[[
- * Additional flags specific to effects
- * 副作用特有的额外标志
-]]
-local EffectFlags = {
-    Queued = 64,       -- 1000000: Effect is queued for execution (1 << 6) / 副作用已排队等待执行
-}
-
---[[
  * Global state for tracking current active subscriber
  * 用于跟踪当前活动订阅者的全局状态
  *
@@ -102,8 +94,8 @@ local g_activeSub = nil    -- Current active effect or computed value / 当前�
  * 副作用被排队并一起执行以获得更好的性能。
  * 这防止了当多个依赖变化时的冗余执行。
 ]]
-local g_queuedEffects = {}       -- Effects waiting to be executed / 等待执行的副作用
-local g_queuedEffectsLength = 0  -- Length of the queue / 队列长度
+local g_queued = {}       -- Effects waiting to be executed / 等待执行的副作用
+local g_queuedLength = 0  -- Length of the queue / 队列长度
 
 --[[
  * Batch update state
@@ -213,23 +205,20 @@ end
  * 它按顺序处理副作用队列，清除排队标志并运行每个副作用。
 ]]
 function reactive.flush()
-    while g_notifyIndex < g_queuedEffectsLength do
-        local effect = g_queuedEffects[g_notifyIndex+1]
-        g_queuedEffects[g_notifyIndex+1] = nil
+    while g_notifyIndex < g_queuedLength do
+        local effect = g_queued[g_notifyIndex+1]
+        g_queued[g_notifyIndex+1] = nil
         g_notifyIndex = g_notifyIndex + 1
 
         if effect then
-            -- Clear the queued flag and run the effect
-            -- 清除排队标志并运行副作用
-            effect.flags = bit.band(effect.flags, bit.bnot(EffectFlags.Queued))
-            reactive.run(effect, effect.flags)
+            reactive.run(effect)
         end
     end
 
     -- Reset queue state after processing all effects
     -- 处理完所有副作用后重置队列状态
     g_notifyIndex = 0
-    g_queuedEffectsLength = 0
+    g_queuedLength = 0
 end
 
 --[[
@@ -237,7 +226,6 @@ end
  * 根据当前状态运行副作用
  *
  * @param e: The effect to run / 要运行的副作用
- * @param flags: Current state flags of the effect / 副作用的当前状态标志
  *
  * This function determines whether an effect needs to run based on its flags.
  * Effects run when they are dirty (definitely need update) or pending (might need update).
@@ -247,7 +235,8 @@ end
  * 副作用在脏（确实需要更新）或待定（可能需要更新）时运行。
  * 在执行期间，副作用成为活动订阅者以收集新的依赖。
 ]]
-function reactive.run(e, flags)
+function reactive.run(e)
+    local flags = e.flags
     local isDirty = bit.band(flags, ReactiveFlags.Dirty) > 0
     local isPending = bit.band(flags, ReactiveFlags.Pending) > 0
 
@@ -256,14 +245,8 @@ function reactive.run(e, flags)
     local shouldRun = false
     if isDirty then
         shouldRun = true
-    elseif isPending then
-        if reactive.checkDirty(e.deps, e) then
-            shouldRun = true
-        else
-            -- Clear pending flag if not dirty
-            -- 如果不是脏的则清除待定标志
-            e.flags = bit.band(flags, bit.bnot(ReactiveFlags.Pending))
-        end
+    elseif isPending and reactive.checkDirty(e.deps, e) then
+        shouldRun = true
     end
 
     -- If the effect is dirty or it's pending and has dirty dependencies
@@ -304,22 +287,9 @@ function reactive.run(e, flags)
         -- 清除陈旧依赖
         reactive.purgeDeps(e)
     else
-        -- Process queued dependent effects
-        -- 处理排队的依赖副作用
-        local link = e.deps
-        while link do
-            local dep = link.dep
-            local depFlags = dep.flags
-
-            -- If dependent effect is queued, run it
-            -- 如果依赖副作用已排队，运行它
-            if bit.band(depFlags, EffectFlags.Queued) > 0 then
-                dep.flags = bit.band(depFlags, bit.bnot(EffectFlags.Queued))
-                reactive.run(dep, dep.flags)
-            end
-
-            link = link.nextDep
-        end
+        -- Restore Watching flag
+        -- 恢复监视标志
+        e.flags = ReactiveFlags.Watching
     end
 end
 
@@ -1013,36 +983,52 @@ function reactive.unwatched(node)
 end
 
 --[[
- * Queues an effect for execution or propagates notification to parent effects
- * 将副作用排队执行或将通知传播到父副作用
+ * Queues an effect for execution, ensuring inner effects are notified in correct order
+ * 将副作用排队执行，确保内部副作用按正确顺序通知
  *
- * @param e: Effect or EffectScope object to notify / 要通知的副作用或副作用作用域对象
+ * @param effect: Effect object to notify / 要通知的副作用对象
  *
- * This function implements a hierarchical notification system where child effects
- * can notify parent effects instead of being queued directly. This enables
- * effect scopes and nested effects to work correctly.
+ * This function implements the new notification system (v3.0.2+) that collects
+ * all nested inner effects in a chain and inserts them in reverse order.
+ * This ensures inner effects execute in the same order as non-inner effects.
  *
- * 该函数实现了分层通知系统，其中子副作用可以通知父副作用而不是直接排队。
- * 这使得副作用作用域和嵌套副作用能够正确工作。
+ * 该函数实现了新的通知系统（v3.0.2+），它在链中收集所有嵌套的内部副作用
+ * 并以反向顺序插入它们。这确保内部副作用以与非内部副作用相同的顺序执行。
 ]]
-function reactive.notify(e)
-    local flags = e.flags
-    if bit.band(flags, EffectFlags.Queued) == 0 then
-        -- Mark as queued to prevent duplicate notifications
-        -- 标记为已排队以防止重复通知
-        e.flags = bit.bor(flags, EffectFlags.Queued)
+function reactive.notify(effect)
+    local insertIndex = g_queuedLength
+    local firstInsertedIndex = insertIndex
 
-        local subs = e.subs
-        if subs then
-            -- If this effect has parent effects, notify the parent instead
-            -- 如果此副作用有父副作用，则通知父副作用
-            reactive.notify(subs.sub)
-        else
-            -- Otherwise, add to the queue for execution
-            -- 否则，添加到队列中执行
-            g_queuedEffectsLength = g_queuedEffectsLength + 1
-            g_queuedEffects[g_queuedEffectsLength] = e
+    -- Collect all inner effects (effects with subs) in a chain
+    -- 在链中收集所有内部副作用（具有subs的副作用）
+    repeat
+        -- Clear the Watching flag
+        -- 清除监视标志
+        effect.flags = bit.band(effect.flags, bit.bnot(ReactiveFlags.Watching))
+        
+        insertIndex = insertIndex + 1
+        g_queued[insertIndex] = effect
+        
+        -- Move to the next inner effect if it exists and is watching
+        -- 如果存在下一个内部副作用且正在监视，则移至该副作用
+        effect = effect.subs and effect.subs.sub or nil
+        if not effect or bit.band(effect.flags, ReactiveFlags.Watching) == 0 then
+            break
         end
+    until false
+
+    g_queuedLength = insertIndex
+
+    -- Reverse the collected effects to maintain correct execution order
+    -- 反转收集的副作用以保持正确的执行顺序
+    -- Note: Lua arrays are 1-indexed, so we need to adjust indices
+    -- 注意：Lua 数组从 1 开始索引，所以需要调整索引
+    while firstInsertedIndex < insertIndex - 1 do
+        local left = g_queued[firstInsertedIndex + 1]
+        g_queued[firstInsertedIndex + 1] = g_queued[insertIndex]
+        g_queued[insertIndex] = left
+        firstInsertedIndex = firstInsertedIndex + 1
+        insertIndex = insertIndex - 1
     end
 end
 
@@ -1199,6 +1185,20 @@ local function computedOper(this)
                 reactive.shallowPropagate(subs)
             end
         end
+    elseif flags == 0 then
+        -- First access: initialize the computed value (v3.0.3+)
+        -- 首次访问：初始化计算值（v3.0.3+）
+        this.flags = ReactiveFlags.Mutable
+        local prevSub = reactive.setActiveSub(this)
+        local success, result = pcall(function()
+            return this.getter()
+        end)
+        g_activeSub = prevSub
+        if success then
+            this.value = result
+        else
+            print("Error in computed initialization: " .. result)
+        end
     end
 
     -- Register this computed as a dependency of the current subscriber
@@ -1237,7 +1237,7 @@ local function computed(getter)
         subsTail = nil,            -- Linked list of subscribers (tail) / 订阅者链表（尾部）
         deps = nil,                -- Dependencies linked list (head) / 依赖链表（头部）
         depsTail = nil,            -- Dependencies linked list (tail) / 依赖链表（尾部）
-        flags = 17,                -- Mutable | Dirty (initialized as dirty) / Mutable | Dirty（初始化为脏）
+        flags = ReactiveFlags.None, -- Start with no flags (will be initialized on first access) / 从无标志开始（将在首次访问时初始化）
         getter = getter,           -- Function to compute the value / 计算值的函数
     }
 

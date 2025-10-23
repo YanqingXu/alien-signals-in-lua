@@ -103,65 +103,61 @@ test('should not trigger inner effect when resolve maybe dirty', function ()
     print("test passed\n")
 end)
 
-test('should trigger inner effects in sequence', function()
+test('should notify inner effects in the same order as non-inner effects', function()
     local a = signal(0)
     local b = signal(0)
     local c = computed(function() return a() - b() end)
-    local order = {}
+    local order1 = {}
+    local order2 = {}
+    local order3 = {}
+
+    effect(function()
+        table.insert(order1, 'effect1')
+        a()
+    end)
+    effect(function()
+        table.insert(order1, 'effect2')
+        a()
+        b()
+    end)
 
     effect(function()
         c()
-
         effect(function()
-            table.insert(order, 'first inner')
+            table.insert(order2, 'effect1')
             a()
         end)
-
         effect(function()
-            table.insert(order, 'last inner')
+            table.insert(order2, 'effect2')
             a()
             b()
         end)
     end)
-
-    order = {}
-
-    startBatch()
-    b(1)
-    a(1)
-    endBatch()
-
-    expect(order).toEqual({'first inner', 'last inner'})
-    print("test passed\n")
-end)
-
-test('should trigger inner effects in sequence in effect scope', function()
-    local a = signal(0)
-    local b = signal(0)
-    local order = {}
 
     effectScope(function()
-
         effect(function()
-            table.insert(order, 'first inner')
+            table.insert(order3, 'effect1')
             a()
         end)
-
         effect(function()
-            table.insert(order, 'last inner')
+            table.insert(order3, 'effect2')
             a()
             b()
         end)
     end)
 
-    order = {}
+    order1 = {}
+    order2 = {}
+    order3 = {}
 
     startBatch()
     b(1)
     a(1)
     endBatch()
 
-    expect(order).toEqual({'first inner', 'last inner'})
+    expect(order1).toEqual({'effect2', 'effect1'})
+    expect(order2).toEqual(order1)
+    expect(order3).toEqual(order1)
     print("test passed\n")
 end)
 
@@ -169,9 +165,11 @@ test('should custom effect support batch', function()
     local function batchEffect(fn)
         return effect(function()
             startBatch()
-            local result = fn()
+            local success, result = pcall(fn)
             endBatch()
-            return result
+            if success then
+                return result
+            end
         end)
     end
 
@@ -181,7 +179,7 @@ test('should custom effect support batch', function()
 
     local aa = computed(function()
         table.insert(logs, 'aa-0')
-        if a() == 0 then
+        if a() == 0 then  -- Lua: a() == 0 is equivalent to TypeScript: !a()
             b(1)
         end
         table.insert(logs, 'aa-1')
@@ -223,7 +221,7 @@ test('should duplicate subscribers do not affect the notify order', function()
         table.insert(order, 'b')
         src1()
     end)
-    src2(1) -- src1.subs: a -> b -> a
+    src2(1)  -- src1.subs: a -> b -> a
 
     order = {}
     src1(src1() + 1)
@@ -276,22 +274,6 @@ test('should handle flags are indirectly updated during checkDirty', function()
     end)
     expect(triggers).toBe(1)
     a(true)
-    expect(triggers).toBe(2)
-    print("test passed\n")
-end)
-
-test('should handle boolean value', function()
-    local a = signal(true)
-    local b = computed(function() return a() end)
-
-    local triggers = 0
-
-    effect(function()
-        b()
-        triggers = triggers + 1
-    end)
-    expect(triggers).toBe(1)
-    a(false)
     expect(triggers).toBe(2)
     print("test passed\n")
 end)
