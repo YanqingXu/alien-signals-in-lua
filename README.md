@@ -1,6 +1,6 @@
 # Alien Signals - Lua响应式编程系统
 
-**版本: 3.0.1** - 兼容 alien-signals v3.0.1
+**版本: 3.0.3** - 兼容 alien-signals v3.0.3
 
 [English README](README.en.md)
 
