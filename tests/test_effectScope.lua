@@ -17,7 +17,7 @@ test('should not trigger after stop', function ()
     local count = signal(1)
 
     local triggers = 0
-    local effect1
+    local effect1 = nil
 
     local stopScope = effectScope(function()
         effect1 = effect(function()
@@ -58,6 +58,25 @@ test('should dispose inner effects if created in an effect', function()
         dispose()
         source(3)
         expect(triggers).toBe(2)
+
+    print("test passed\n")
+end)
+
+test('should track signal updates in an inner scope when accessed by an outer effect', function()
+    local source = signal(1)
+
+    local triggers = 0
+
+    effect(function()
+        effectScope(function()
+            source()
+        end)
+        triggers = triggers + 1
+    end)
+
+    expect(triggers).toBe(1)
+    source(2)
+    expect(triggers).toBe(2)
     end)
 
     print("test passed\n")
