@@ -1634,4 +1634,5 @@ return {
 
     -- Advanced API (for internal or advanced usage) / 高级 API（用于内部或高级用法）
     setActiveSub = reactive.setActiveSub,  -- Set current subscriber / 设置当前订阅者
+    ReactiveFlags = ReactiveFlags,  -- Reactive flags constants / 反应式标志常量
 }

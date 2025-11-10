@@ -15,6 +15,7 @@ local setActiveSub = reactive.setActiveSub
 local utils = require("utils")
 local test = utils.test
 local expect = utils.expect
+local bit = require("bit")
 
 
 test('should clear subscriptions when untracked by all subscribers', function ()
@@ -65,7 +66,7 @@ test('should run outer effect first', function ()
     local b = signal(1)
 
     effect(function()
-        if a() > 0 then
+        if a() ~= 0 then
             effect(function()
                 b()
                 if a() == 0 then
@@ -275,6 +276,47 @@ test('should handle flags are indirectly updated during checkDirty', function()
     expect(triggers).toBe(1)
     a(true)
     expect(triggers).toBe(2)
+    print("test passed\n")
+end)
+
+test('should handle effect recursion for the first execution', function()
+    local src1 = signal(0)
+    local src2 = signal(0)
+
+    local triggers1 = 0
+    local triggers2 = 0
+
+    effect(function()
+        triggers1 = triggers1 + 1
+        src1(math.min(src1() + 1, 5))
+    end)
+    effect(function()
+        triggers2 = triggers2 + 1
+        src2(math.min(src2() + 1, 5))
+        src2()
+    end)
+
+    expect(triggers1).toBe(1)
+    expect(triggers2).toBe(1)
+    print("test passed\n")
+end)
+
+test('should support custom recurse effect', function()
+    local getActiveSub = reactive.getActiveSub
+    local ReactiveFlags = reactive.ReactiveFlags
+
+    local src = signal(0)
+
+    local triggers = 0
+
+    effect(function()
+        local activeSub = getActiveSub()
+        activeSub.flags = bit.band(activeSub.flags, bit.bnot(ReactiveFlags.RecursedCheck))
+        triggers = triggers + 1
+        src(math.min(src() + 1, 5))
+    end)
+
+    expect(triggers).toBe(6)
     print("test passed\n")
 end)
 
