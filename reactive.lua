@@ -2,8 +2,8 @@
  * Alien Signals - A reactive programming system for Lua
  * Alien Signals - Lua 响应式编程系统
  *
- * Version: 3.0.3 (compatible with alien-signals v3.0.3)
- * 版本: 3.0.3 (兼容 alien-signals v3.0.3)
+ * Version: 3.1.0 (compatible with alien-signals v3.1.0)
+ * 版本: 3.1.0 (兼容 alien-signals v3.1.0)
  *
  * Derived from https://github.com/stackblitz/alien-signals
  * 源自 https://github.com/stackblitz/alien-signals
@@ -15,6 +15,7 @@
  * - Effects (side effects that run when dependencies change)
  * - Effect scopes (grouping and cleanup of multiple effects)
  * - Batch updates (efficient bulk state changes)
+ * - Manual triggering (trigger updates for mutated values)
  *
  * 该模块实现了一个功能完整的响应式系统，具有自动依赖跟踪和高效的更新传播。它提供：
  * - 响应式信号（可变的响应式值）
@@ -22,6 +23,7 @@
  * - 副作用（当依赖变化时运行的副作用）
  * - 副作用作用域（多个副作用的分组和清理）
  * - 批量更新（高效的批量状态变更）
+ * - 手动触发（为已修改的值触发更新）
 ]]
 
 local bit = require("bit")
@@ -394,7 +396,8 @@ function reactive.link(dep, sub, version)
 
     -- Create a new link and insert it in both chains
     -- 创建新链接并将其插入到两个链中
-    local newLink = reactive.createLink(dep, sub, prevDep, nextDep, prevSub)
+    -- createLink(dep, sub, prevSub, nextSub, prevDep, nextDep)
+    local newLink = reactive.createLink(dep, sub, prevSub, nil, prevDep, nextDep)
     newLink.version = linkVersion  -- Set current version for deduplication / 设置当前版本号用于去重
     dep.subsTail = newLink  -- Add to dependency's subscribers chain / 添加到依赖的订阅者链
     sub.depsTail = newLink  -- Add to subscriber's dependencies chain / 添加到订阅者的依赖链
@@ -445,9 +448,9 @@ function reactive.unlink(link, sub)
     -- Remove from the dependency chain (horizontal)
     -- 从依赖链中移除（水平方向）
     if nextDep then
-        nextDep.prevDep = prevSub
+        nextDep.prevDep = prevDep
     else
-        sub.depsTail = prevSub
+        sub.depsTail = prevDep
     end
 
     if prevDep then
@@ -845,7 +848,10 @@ function reactive.shallowPropagate(link)
         if bit.band(subFlags, 48) == 32 then
             sub.flags = bit.bor(subFlags, ReactiveFlags.Dirty)
 
-            if bit.band(subFlags, ReactiveFlags.Watching) > 0 then
+            -- Only notify if Watching flag is set and RecursedCheck is not set
+            -- 只有在设置了 Watching 标志且未设置 RecursedCheck 时才通知
+            -- 6: Watching | RecursedCheck, 2: Watching
+            if bit.band(subFlags, 6) == 2 then
                 reactive.notify(sub)
             end
         end
@@ -1186,14 +1192,19 @@ local function computedOper(this)
             end
         end
     elseif flags == 0 then
-        -- First access: initialize the computed value (v3.0.3+)
-        -- 首次访问：初始化计算值（v3.0.3+）
-        this.flags = ReactiveFlags.Mutable
+        -- First access: initialize the computed value (v3.1.0+)
+        -- 首次访问：初始化计算值（v3.1.0+）
+        -- Set Mutable and RecursedCheck flags to prevent recursion on first run
+        -- 设置 Mutable 和 RecursedCheck 标志以防止首次运行时递归
+        this.flags = bit.bor(ReactiveFlags.Mutable, ReactiveFlags.RecursedCheck)
         local prevSub = reactive.setActiveSub(this)
         local success, result = pcall(function()
             return this.getter()
         end)
         g_activeSub = prevSub
+        -- Clear RecursedCheck flag after first run
+        -- 首次运行后清除 RecursedCheck 标志
+        this.flags = bit.band(this.flags, bit.bnot(ReactiveFlags.RecursedCheck))
         if success then
             this.value = result
         else
@@ -1341,7 +1352,9 @@ local function effect(fn)
         subsTail = nil,             -- End of subscribers list / 订阅者列表的末尾
         deps = nil,                 -- Dependencies linked list (head) / 依赖链表（头部）
         depsTail = nil,             -- Dependencies linked list (tail) / 依赖链表（尾部）
-        flags = ReactiveFlags.Watching, -- Mark as watching (reactive) / 标记为监视（响应式）
+        -- Mark as watching and set RecursedCheck to prevent recursion on first run
+        -- 标记为监视并设置 RecursedCheck 以防止首次运行时递归
+        flags = bit.bor(ReactiveFlags.Watching, ReactiveFlags.RecursedCheck),
     }
 
     -- Set this effect as active subscriber and link to parent if any
@@ -1358,6 +1371,10 @@ local function effect(fn)
     -- Restore previous subscriber
     -- 恢复之前的订阅者
     g_activeSub = prevSub
+
+    -- Clear RecursedCheck flag after first run
+    -- 首次运行后清除 RecursedCheck 标志
+    e.flags = bit.band(e.flags, bit.bnot(ReactiveFlags.RecursedCheck))
 
     if not success then
         error(err)
@@ -1425,6 +1442,84 @@ local function effectScope(fn)
     -- Return the cleanup function for the entire scope
     -- 返回整个作用域的清理函数
     return bind(effectScopeOper, e)
+end
+
+--[[
+ * Manually triggers updates for dependencies
+ * 手动触发依赖更新
+ *
+ * @param fn: A signal or a function that accesses signals / 一个信号或访问信号的函数
+ *
+ * The trigger() function allows you to manually trigger updates for downstream
+ * dependencies when you've directly mutated a signal's value without using the
+ * signal setter. This is useful when working with mutable data structures like
+ * arrays or tables.
+ *
+ * trigger() 函数允许您在直接修改信号值而不使用信号设置器时手动触发下游依赖的更新。
+ * 这在处理可变数据结构（如数组或表）时很有用。
+ *
+ * Usage examples / 使用示例:
+ * 1. Trigger a single signal / 触发单个信号:
+ *    trigger(mySignal)
+ *
+ * 2. Trigger multiple signals / 触发多个信号:
+ *    trigger(function()
+ *        signal1()
+ *        signal2()
+ *    end)
+]]
+local function trigger(fn)
+    -- Create a temporary subscriber to collect dependencies
+    -- 创建临时订阅者以收集依赖
+    local sub = {
+        deps = nil,
+        depsTail = nil,
+        flags = ReactiveFlags.Watching,
+    }
+
+    local prevSub = reactive.setActiveSub(sub)
+
+    -- Execute the function or call the signal to collect dependencies
+    -- 执行函数或调用信号以收集依赖
+    local success, err = pcall(function()
+        fn()
+    end)
+
+    -- Restore previous subscriber and trigger updates
+    -- 恢复之前的订阅者并触发更新
+    reactive.setActiveSub(prevSub)
+
+    if not success then
+        error(err)
+    end
+
+    -- Trigger updates for all collected dependencies
+    -- 为所有收集的依赖触发更新
+    repeat
+        local link = sub.deps
+        if not link then
+            break
+        end
+
+        local dep = link.dep
+
+        -- Unlink this dependency (unlink returns nextDep)
+        -- 取消此依赖的链接（unlink 返回 nextDep）
+        reactive.unlink(link, sub)
+
+        -- Propagate updates if the dependency has subscribers
+        -- 如果依赖有订阅者，则传播更新
+        if dep.subs then
+            reactive.propagate(dep.subs)
+            reactive.shallowPropagate(dep.subs)
+        end
+    until not sub.deps
+
+    -- Flush queued effects if not in a batch
+    -- 如果不在批处理中，则刷新排队的副作用
+    if g_batchDepth == 0 then
+        reactive.flush()
+    end
 end
 
 --[[
@@ -1521,6 +1616,7 @@ return {
     computed = computed,       -- Create a computed value / 创建计算值
     effect = effect,           -- Create a reactive effect / 创建响应式副作用
     effectScope = effectScope, -- Create an effect scope / 创建副作用作用域
+    trigger = trigger,         -- Manually trigger updates / 手动触发更新
 
     -- Type checking / 类型检查
     isSignal = isSignal,       -- Check if value is a signal / 检查值是否为信号

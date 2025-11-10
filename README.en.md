@@ -1,6 +1,6 @@
 # Alien Signals - Lua Reactive Programming System
 
-**Version: 3.0.3** - Compatible with alien-signals v3.0.3
+**Version: 3.1.0** - Compatible with alien-signals v3.1.0
 
 [简体中文 README](README.md)
 
@@ -110,6 +110,42 @@ count(10)
 multiplier(3)
 endBatch() -- Output: Result: 30
 ```
+
+### Manual Trigger Updates
+
+When you directly modify the internal state of a reactive value (instead of using the setter), you can use the `trigger` function to manually trigger dependency updates.
+
+```lua
+local reactive = require("reactive")
+local signal = reactive.signal
+local computed = reactive.computed
+local trigger = reactive.trigger
+
+-- Create a signal containing an array
+local arr = signal({1, 2, 3})
+
+-- Create a computed property to get the array length
+local length = computed(function()
+    return #arr()
+end)
+
+print("Initial length:", length())  -- Output: Initial length: 3
+
+-- Directly modify the array content (won't automatically trigger updates)
+table.insert(arr(), 4)
+
+-- Use trigger to manually trigger updates
+trigger(function()
+    arr()  -- Access the signal to collect dependencies
+end)
+
+print("Updated length:", length())  -- Output: Updated length: 4
+```
+
+**Notes:**
+- `trigger` is mainly used for handling cases where you directly modify the internal state of reactive values
+- If possible, prefer using the setter approach to modify values (e.g., `arr({1, 2, 3, 4})`)
+- `trigger` collects all dependencies accessed in the callback function and triggers their updates
 
 The system uses the following techniques to implement reactivity:
 

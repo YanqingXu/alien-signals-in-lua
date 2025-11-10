@@ -1,6 +1,6 @@
 # Alien Signals - Lua响应式编程系统
 
-**版本: 3.0.3** - 兼容 alien-signals v3.0.3
+**版本: 3.1.0** - 兼容 alien-signals v3.1.0
 
 [English README](README.en.md)
 
@@ -110,6 +110,42 @@ count(10)
 multiplier(3)
 endBatch() -- 输出：结果: 30
 ```
+
+### 手动触发更新（trigger）
+
+当你直接修改响应式值的内部状态（而不是通过setter），可以使用 `trigger` 函数手动触发依赖更新。
+
+```lua
+local reactive = require("reactive")
+local signal = reactive.signal
+local computed = reactive.computed
+local trigger = reactive.trigger
+
+-- 创建一个包含数组的信号
+local arr = signal({1, 2, 3})
+
+-- 创建一个计算属性来获取数组长度
+local length = computed(function()
+    return #arr()
+end)
+
+print("初始长度:", length())  -- 输出: 初始长度: 3
+
+-- 直接修改数组内容（不会自动触发更新）
+table.insert(arr(), 4)
+
+-- 使用 trigger 手动触发更新
+trigger(function()
+    arr()  -- 访问信号以收集依赖
+end)
+
+print("更新后长度:", length())  -- 输出: 更新后长度: 4
+```
+
+**注意事项：**
+- `trigger` 主要用于处理直接修改响应式值内部状态的情况
+- 如果可能，优先使用 setter 方式修改值（如 `arr({1, 2, 3, 4})`）
+- `trigger` 会收集回调函数中访问的所有依赖，并触发它们的更新
 
 系统使用了以下技术来实现响应式：
 
