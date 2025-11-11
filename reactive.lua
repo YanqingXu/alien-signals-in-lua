@@ -240,59 +240,67 @@ end
 function reactive.run(e)
     local flags = e.flags
     local isDirty = bit.band(flags, ReactiveFlags.Dirty) > 0
-    local isPending = bit.band(flags, ReactiveFlags.Pending) > 0
 
     -- Check if we need to run the effect
     -- 检查是否需要运行副作用
     local shouldRun = false
-    if isDirty then
-        shouldRun = true
-    elseif isPending and reactive.checkDirty(e.deps, e) then
-        shouldRun = true
-    end
-
-    -- If the effect is dirty or it's pending and has dirty dependencies
-    -- 如果副作用是脏的，或者它是待定的且有脏依赖
-    if shouldRun then
-        -- Increment global version counter for this tracking cycle
-        -- 为此跟踪周期递增全局版本计数器
-        g_currentVersion = g_currentVersion + 1
-
-        -- Reset dependency tail to collect dependencies from scratch
-        -- 重置依赖尾部以从头收集依赖
-        e.depsTail = nil
-
-        -- Set flags: Watching | RecursedCheck (2 | 4 = 6)
-        -- 设置标志：监视 | 递归检查
-        e.flags = 6
-
-        -- Track effect execution to collect dependencies
-        -- 跟踪副作用执行以收集依赖
-        local prev = reactive.setActiveSub(e)
-
-        -- Execute the effect function safely
-        -- 安全地执行副作用函数
-        local result, err = pcall(e.fn)
-        if not result then
-            print("Error in effect: " .. err)
+    repeat
+        if isDirty then
+            shouldRun = true
+            break
         end
 
-        -- Restore previous state and finish tracking
-        -- 恢复之前的状态并完成跟踪
-        g_activeSub = prev
+        local isPending = bit.band(flags, ReactiveFlags.Pending) > 0
+        if not isPending then
+            break
+        end
 
-        -- Clear the recursion check flag
-        -- 清除递归检查标志
-        e.flags = bit.band(e.flags, bit.bnot(ReactiveFlags.RecursedCheck))
+        if reactive.checkDirty(e.deps, e) then
+            shouldRun = true
+        end
+    until true
 
-        -- Purge stale dependencies
-        -- 清除陈旧依赖
-        reactive.purgeDeps(e)
-    else
+    if not shouldRun then
         -- Restore Watching flag
         -- 恢复监视标志
         e.flags = ReactiveFlags.Watching
+        return
     end
+
+    -- Increment global version counter for this tracking cycle
+    -- 为此跟踪周期递增全局版本计数器
+    g_currentVersion = g_currentVersion + 1
+
+    -- Reset dependency tail to collect dependencies from scratch
+    -- 重置依赖尾部以从头收集依赖
+    e.depsTail = nil
+
+    -- Set flags: Watching | RecursedCheck (2 | 4 = 6)
+    -- 设置标志：监视 | 递归检查
+    e.flags = 6
+
+    -- Track effect execution to collect dependencies
+    -- 跟踪副作用执行以收集依赖
+    local prev = reactive.setActiveSub(e)
+
+    -- Execute the effect function safely
+    -- 安全地执行副作用函数
+    local result, err = pcall(e.fn)
+    if not result then
+        print("Error in effect: " .. err)
+    end
+
+    -- Restore previous state and finish tracking
+    -- 恢复之前的状态并完成跟踪
+    g_activeSub = prev
+
+    -- Clear the recursion check flag
+    -- 清除递归检查标志
+    e.flags = bit.band(e.flags, bit.bnot(ReactiveFlags.RecursedCheck))
+
+    -- Purge stale dependencies
+    -- 清除陈旧依赖
+    reactive.purgeDeps(e)
 end
 
 --[[
