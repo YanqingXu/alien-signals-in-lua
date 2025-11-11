@@ -352,10 +352,6 @@ end
  * 4. 为按顺序添加依赖的常见情况进行优化
 ]]
 function reactive.link(dep, sub, version)
-    -- Use provided version or current global version
-    -- 使用提供的版本或当前全局版本
-    local linkVersion = version or g_currentVersion
-
     -- Check if this dependency is already the last one in the chain
     -- 检查这个依赖是否已经是链中的最后一个
     local prevDep = sub.depsTail
@@ -363,34 +359,23 @@ function reactive.link(dep, sub, version)
         return
     end
 
-    local nextDep = nil
+    local nextDep
+    if prevDep then
+        nextDep = prevDep.nextDep
+    else
+        nextDep = sub.deps
+    end
 
-    -- Handle circular dependency detection
-    -- 处理循环依赖检测
-    if bit.band(sub.flags, ReactiveFlags.RecursedCheck) > 0 then
-        -- Correctly handle the case where prevDep.nextDep might be nil
-        -- 正确处理prevDep.nextDep可能为nil的情况
-        if prevDep then
-            nextDep = prevDep.nextDep
-        else
-            nextDep = sub.deps
-        end
-
-        -- If we already have this dependency in the chain during recursion check
-        -- 如果在递归检查期间链中已经有这个依赖
-        if nextDep and nextDep.dep == dep then
-            nextDep.version = linkVersion  -- Update version for current cycle / 为当前周期更新版本号
-            sub.depsTail = nextDep
-            return
-        end
+    if nextDep and nextDep.dep == dep then
+        nextDep.version = version
+        sub.depsTail = nextDep
+        return
     end
 
     -- Check if the sub is already subscribed to this dependency using version-based deduplication
     -- 使用基于版本号的去重检查订阅者是否已经订阅了这个依赖
     local prevSub = dep.subsTail
-    if prevSub and prevSub.version == linkVersion and prevSub.sub == sub then
-        -- Only deduplicate if it's the same subscriber AND same tracking cycle (matching TypeScript logic)
-        -- 只有在同一个订阅者且同一个跟踪周期时才去重（匹配TypeScript逻辑）
+    if prevSub and prevSub.version == version and prevSub.sub == sub then
         return
     end
 
@@ -398,7 +383,8 @@ function reactive.link(dep, sub, version)
     -- 创建新链接并将其插入到两个链中
     -- createLink(dep, sub, prevSub, nextSub, prevDep, nextDep)
     local newLink = reactive.createLink(dep, sub, prevSub, nil, prevDep, nextDep)
-    newLink.version = linkVersion  -- Set current version for deduplication / 设置当前版本号用于去重
+    newLink.version = version
+
     dep.subsTail = newLink  -- Add to dependency's subscribers chain / 添加到依赖的订阅者链
     sub.depsTail = newLink  -- Add to subscriber's dependencies chain / 添加到订阅者的依赖链
 
@@ -954,37 +940,12 @@ end
  * - 副作用/作用域：执行完整清理以防止内存泄漏
 ]]
 function reactive.unwatched(node)
-    if node.getter then
-        -- For computed values, clean up dependencies and mark as dirty
-        -- 对于计算值，清理依赖并标记为脏
-        local toRemove = node.deps
-        if toRemove then
-            -- 17: Mutable | Dirty
-            node.flags = 17
-        end
-
-        -- Unlink all dependencies
-        -- 取消所有依赖的链接
-        repeat
-            toRemove = reactive.unlink(toRemove, node)
-        until not toRemove
-    elseif node.fn then
-        -- For effects, clean up
-        -- 对于副作用，进行清理
-        reactive.effectOper(node)
-    elseif bit.band(node.flags, ReactiveFlags.Mutable) == 0 then
-        -- For effect scopes (flag check: not Mutable), clean up
-        -- 对于副作用作用域（标志检查：不是 Mutable），进行清理
-        -- Inline effectScopeOper logic
-        -- 内联effectScopeOper逻辑
-        local dep = node.deps
-        while(dep) do
-            dep = reactive.unlink(dep, node)
-        end
-        local sub = node.subs
-        if sub then
-            reactive.unlink(sub)
-        end
+    if bit.band(node.flags, ReactiveFlags.Mutable) == 0 then
+        reactive.effectScopeOper(node)
+    elseif node.depsTail then
+        node.depsTail = nil
+        node.flags = bit.bor(ReactiveFlags.Mutable, ReactiveFlags.Dirty)
+        reactive.purgeDeps(node)
     end
 end
 
@@ -1278,7 +1239,7 @@ end
  * 1. 移除所有依赖链接
  * 2. 如果有的话，从父作用域取消链接
 ]]
-local function effectScopeOper(this)
+function reactive.effectScopeOper(this)
     -- Clear depsTail and flags
     -- 清除 depsTail 和 flags
     this.depsTail = nil
@@ -1314,7 +1275,7 @@ end
  * 3. 清除所有状态标志以标记为非活动
 ]]
 local function effectOper(this)
-    effectScopeOper(this)
+    reactive.effectScopeOper(this)
     this.flags = ReactiveFlags.None
 end
 reactive.effectOper = effectOper
@@ -1441,7 +1402,7 @@ local function effectScope(fn)
 
     -- Return the cleanup function for the entire scope
     -- 返回整个作用域的清理函数
-    return bind(effectScopeOper, e)
+    return bind(reactive.effectScopeOper, e)
 end
 
 --[[
