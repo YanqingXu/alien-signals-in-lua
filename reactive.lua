@@ -980,10 +980,10 @@ function reactive.notify(effect)
         -- Clear the Watching flag
         -- 清除监视标志
         effect.flags = bit.band(effect.flags, bit.bnot(ReactiveFlags.Watching))
-        
+
         insertIndex = insertIndex + 1
         g_queued[insertIndex] = effect
-        
+
         -- Move to the next inner effect if it exists and is watching
         -- 如果存在下一个内部副作用且正在监视，则移至该副作用
         effect = effect.subs and effect.subs.sub or nil
@@ -1028,10 +1028,13 @@ end
  * - 当使用值调用时：作为设置器，更新信号并通知订阅者
  * - 当不带参数调用时：作为获取器，返回当前值并注册依赖
 ]]
-local function signalOper(this, newValue)
-    if newValue ~= nil then
-        -- Set operation (when called with a value)
-        -- 设置操作（当使用值调用时）
+local function signalOper(this, ...)
+    local argCount = select('#', ...)
+
+    if argCount > 0 then
+        -- Set operation (when called with a value, even if it's nil)
+        -- 设置操作（当使用值调用时，即使值是 nil）
+        local newValue = select(1, ...)
         if newValue ~= this.pendingValue then
             this.pendingValue = newValue
             this.flags = bit.bor(ReactiveFlags.Mutable, ReactiveFlags.Dirty)
@@ -1132,22 +1135,27 @@ end
 local function computedOper(this)
     local flags = this.flags
     local isDirty = bit.band(flags, ReactiveFlags.Dirty) > 0
-    local maybeDirty = bit.band(flags, ReactiveFlags.Pending) > 0
 
     -- Check if we need to recalculate
     -- 检查是否需要重新计算
     local shouldUpdate = false
-    if isDirty then
-        shouldUpdate = true
-    elseif maybeDirty then
+    repeat
+        if isDirty then
+            shouldUpdate = true
+            break
+        end
+
+        local maybeDirty = bit.band(flags, ReactiveFlags.Pending) > 0
+        if not maybeDirty then
+            break
+        end
+
         if reactive.checkDirty(this.deps, this) then
             shouldUpdate = true
         else
-            -- Clear pending flag if not dirty
-            -- 如果不是脏的则清除待定标志
             this.flags = bit.band(flags, bit.bnot(ReactiveFlags.Pending))
         end
-    end
+    until true
 
     -- Recalculate value if it's dirty or possibly dirty (needs checking)
     -- 如果是脏的或可能是脏的（需要检查），则重新计算值
@@ -1181,15 +1189,8 @@ local function computedOper(this)
         end
     end
 
-    -- Register this computed as a dependency of the current subscriber
-    -- 将此计算值注册为当前订阅者的依赖
-    local sub = g_activeSub
-    while sub do
-        if bit.band(sub.flags, 3) > 0 then  -- Mutable | Watching
-            reactive.link(this, sub, g_currentVersion)
-            break
-        end
-        sub = sub.subs and sub.subs.sub or nil
+    if g_activeSub then
+        reactive.link(this, g_activeSub, g_currentVersion)
     end
 
     return this.value
