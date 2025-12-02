@@ -84,6 +84,31 @@ test('should trigger effect once', function()
     print("test passed\n")
 end)
 
+test('should not notify the trigger function sub', function()
+    local src1 = signal({})
+    local src2 = computed(function()
+        return src1()
+    end)
+
+    effect(function()
+        src1()
+        src2()
+    end)
+
+    -- This should not throw an error or cause infinite recursion
+    -- 这不应该抛出错误或导致无限递归
+    local success = pcall(function()
+        trigger(function()
+            src1()
+            src2()
+        end)
+    end)
+
+    expect(success).toBe(true)
+
+    print("test passed\n")
+end)
+
 print("========== All tests passed!!! ==========\n")
 print("====================================================\n")
 

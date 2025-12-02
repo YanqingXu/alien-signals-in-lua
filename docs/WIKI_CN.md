@@ -1,6 +1,6 @@
 # Alien Signals Lua 实现 - 深度技术解析
 
-**版本: 3.0.1** - 兼容 alien-signals v3.0.1
+**版本: 3.1.1** - 兼容 alien-signals v3.1.1
 
 ## 目录
 

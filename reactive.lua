@@ -1465,25 +1465,25 @@ local function trigger(fn)
 
     -- Trigger updates for all collected dependencies
     -- 为所有收集的依赖触发更新
-    repeat
-        local link = sub.deps
-        if not link then
-            break
-        end
-
+    local link = sub.deps
+    while link do
         local dep = link.dep
 
         -- Unlink this dependency (unlink returns nextDep)
         -- 取消此依赖的链接（unlink 返回 nextDep）
-        reactive.unlink(link, sub)
+        link = reactive.unlink(link, sub)
 
         -- Propagate updates if the dependency has subscribers
         -- 如果依赖有订阅者，则传播更新
-        if dep.subs then
-            reactive.propagate(dep.subs)
-            reactive.shallowPropagate(dep.subs)
+        local subs = dep.subs
+        if subs then
+            -- Reset flags before propagate to prevent the trigger function sub from being notified
+            -- 在传播前重置标志位，防止 trigger 函数的临时订阅者被通知
+            sub.flags = ReactiveFlags.None
+            reactive.propagate(subs)
+            reactive.shallowPropagate(subs)
         end
-    until not sub.deps
+    end
 
     -- Flush queued effects if not in a batch
     -- 如果不在批处理中，则刷新排队的副作用

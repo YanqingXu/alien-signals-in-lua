@@ -1,6 +1,6 @@
 # Alien Signals Lua Implementation - In-Depth Technical Analysis
 
-**Version: 3.0.1** - Compatible with alien-signals v3.0.1
+**Version: 3.1.1** - Compatible with alien-signals v3.1.1
 
 ## Table of Contents
 
