@@ -2,8 +2,8 @@
  * Alien Signals - A reactive programming system for Lua
  * Alien Signals - Lua 响应式编程系统
  *
- * Version: 3.1.0 (compatible with alien-signals v3.1.0)
- * 版本: 3.1.0 (兼容 alien-signals v3.1.0)
+ * Version: 3.1.1 (compatible with alien-signals v3.1.1)
+ * 版本: 3.1.1 (兼容 alien-signals v3.1.1)
  *
  * Derived from https://github.com/stackblitz/alien-signals
  * 源自 https://github.com/stackblitz/alien-signals
