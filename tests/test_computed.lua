@@ -7,7 +7,7 @@ local utils = require("utils")
 local test = utils.test
 local expect = utils.expect
 
-local reactive = require("reactive")
+local reactive = require("alien_signals")
 local signal = reactive.signal
 local computed = reactive.computed
 

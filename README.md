@@ -35,7 +35,7 @@ Alien Signals是一个高效的响应式编程系统，它通过简洁而强大�
 ## 使用示例
 
 ```lua
-local reactive = require("reactive")
+local reactive = require("alien_signals")
 local signal = reactive.signal
 local computed = reactive.computed
 local effect = reactive.effect
@@ -86,7 +86,7 @@ count(5)  -- 不会触发任何输出
 在进行多个状态更新时，可以使用批量更新模式避免多次触发副作用，提高性能。
 
 ```lua
-local reactive = require("reactive")
+local reactive = require("alien_signals")
 local signal = reactive.signal
 local effect = reactive.effect
 local startBatch = reactive.startBatch
@@ -116,7 +116,7 @@ endBatch() -- 输出：结果: 30
 当你直接修改响应式值的内部状态（而不是通过setter），可以使用 `trigger` 函数手动触发依赖更新。
 
 ```lua
-local reactive = require("reactive")
+local reactive = require("alien_signals")
 local signal = reactive.signal
 local computed = reactive.computed
 local trigger = reactive.trigger
@@ -348,7 +348,7 @@ graph LR
 ## 完整API参考
 
 ```lua
-local reactive = require("reactive")
+local reactive = require("alien_signals")
 
 -- 核心响应式原语
 local signal = reactive.signal           -- 创建响应式信号

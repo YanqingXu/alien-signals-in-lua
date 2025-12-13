@@ -3,7 +3,7 @@
 print("========== Reactive System Effect Scope Tests ==========\n")
 
 -- Load reactive system
-local reactive = require("reactive")
+local reactive = require("alien_signals")
 local signal = reactive.signal
 local effect = reactive.effect
 local effectScope = reactive.effectScope

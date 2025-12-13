@@ -9,7 +9,7 @@
 
 print("========== Issue #48 Regression Test ==========\n")
 
-local reactive = require("reactive")
+local reactive = require("alien_signals")
 local signal = reactive.signal
 local computed = reactive.computed
 local effect = reactive.effect

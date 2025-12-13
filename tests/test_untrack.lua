@@ -3,7 +3,7 @@
 print("========== Reactive System Untrack Tests ==========\n")
 
 -- Load reactive system
-local reactive = require("reactive")
+local reactive = require("alien_signals")
 local signal = reactive.signal
 local computed = reactive.computed
 local effect = reactive.effect

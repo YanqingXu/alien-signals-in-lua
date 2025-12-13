@@ -35,7 +35,7 @@ Alien Signals is an efficient reactive programming system. It provides automatic
 ## Usage Example
 
 ```lua
-local reactive = require("reactive")
+local reactive = require("alien_signals")
 local signal = reactive.signal
 local computed = reactive.computed
 local effect = reactive.effect
@@ -86,7 +86,7 @@ count(5)  -- Won't trigger any output
 When performing multiple state updates, you can use batch update mode to avoid triggering effects multiple times, improving performance.
 
 ```lua
-local reactive = require("reactive")
+local reactive = require("alien_signals")
 local signal = reactive.signal
 local effect = reactive.effect
 local startBatch = reactive.startBatch
@@ -116,7 +116,7 @@ endBatch() -- Output: Result: 30
 When you directly modify the internal state of a reactive value (instead of using the setter), you can use the `trigger` function to manually trigger dependency updates.
 
 ```lua
-local reactive = require("reactive")
+local reactive = require("alien_signals")
 local signal = reactive.signal
 local computed = reactive.computed
 local trigger = reactive.trigger
@@ -348,7 +348,7 @@ This complex dependency relationship is efficiently managed through the doubly-l
 ## Complete API Reference
 
 ```lua
-local reactive = require("reactive")
+local reactive = require("alien_signals")
 
 -- Core reactive primitives
 local signal = reactive.signal           -- Create reactive signal
