@@ -2,8 +2,8 @@
  * Alien Signals - A reactive programming system for Lua
  * Alien Signals - Lua 响应式编程系统
  *
- * Version: 3.1.1 (compatible with alien-signals v3.1.1)
- * 版本: 3.1.1 (兼容 alien-signals v3.1.1)
+ * Version: 3.1.2 (compatible with alien-signals v3.1.2)
+ * 版本: 3.1.2 (兼容 alien-signals v3.1.2)
  *
  * Derived from https://github.com/stackblitz/alien-signals
  * 源自 https://github.com/stackblitz/alien-signals
@@ -207,13 +207,26 @@ end
  * 它按顺序处理副作用队列，清除排队标志并运行每个副作用。
 ]]
 function reactive.flush()
+    local success, err = pcall(function()
+        while g_notifyIndex < g_queuedLength do
+            local effect = g_queued[g_notifyIndex+1]
+            g_queued[g_notifyIndex+1] = nil
+            g_notifyIndex = g_notifyIndex + 1
+
+            if effect then
+                reactive.run(effect)
+            end
+        end
+    end)
+
+    -- Clean up any remaining effects in the queue (not reached due to error)
+    -- 清理队列中剩余的效果（因错误未达到的）
     while g_notifyIndex < g_queuedLength do
         local effect = g_queued[g_notifyIndex+1]
         g_queued[g_notifyIndex+1] = nil
         g_notifyIndex = g_notifyIndex + 1
-
         if effect then
-            reactive.run(effect)
+            effect.flags = bit.bor(effect.flags, bit.bor(ReactiveFlags.Watching, ReactiveFlags.Recursed))
         end
     end
 
@@ -221,6 +234,10 @@ function reactive.flush()
     -- 处理完所有副作用后重置队列状态
     g_notifyIndex = 0
     g_queuedLength = 0
+
+    if not success then
+        error(err)
+    end
 end
 
 --[[
@@ -261,9 +278,11 @@ function reactive.run(e)
     until true
 
     if not shouldRun then
-        -- Restore Watching flag
-        -- 恢复监视标志
-        e.flags = ReactiveFlags.Watching
+        -- Restore Watching flag if effect was not disposed during checkDirty
+        -- 如果副作用在 checkDirty 期间未被处置，恢复监视标志
+        if e.flags ~= 0 then
+            e.flags = ReactiveFlags.Watching
+        end
         return
     end
 
@@ -286,12 +305,9 @@ function reactive.run(e)
     -- Execute the effect function safely
     -- 安全地执行副作用函数
     local result, err = pcall(e.fn)
-    if not result then
-        print("Error in effect: " .. err)
-    end
 
-    -- Restore previous state and finish tracking
-    -- 恢复之前的状态并完成跟踪
+    -- Restore previous state and finish tracking (finally block)
+    -- 恢复之前的状态并完成跟踪（类似 finally 块）
     g_activeSub = prev
 
     -- Clear the recursion check flag
@@ -301,6 +317,12 @@ function reactive.run(e)
     -- Purge stale dependencies
     -- 清除陈旧依赖
     reactive.purgeDeps(e)
+
+    -- Re-throw error so flush() can handle queue cleanup
+    -- 重新抛出错误，以便 flush() 可以处理队列清理
+    if not result then
+        error(err)
+    end
 end
 
 --[[
@@ -711,20 +733,14 @@ local function processCheckStackUnwind(checkDepth, sub, stack, link, dirty)
         local shouldExit = false
 
         checkDepth = checkDepth - 1
-        local firstSub = sub.subs
-        local hasMultipleSubs = firstSub.nextSub ~= nil
-
-        if hasMultipleSubs then
-            link = stack.value
-            stack = stack.prev
-        else
-            link = firstSub
-        end
+        link = stack.value
+        stack = stack.prev
 
         if dirty then
+            local subs = sub.subs
             if reactive.update(sub) then
-                if hasMultipleSubs then
-                    reactive.shallowPropagate(firstSub)
+                if subs and subs.nextSub then
+                    reactive.shallowPropagate(subs)
                 end
                 sub = link.sub
                 shouldExit = true
@@ -776,17 +792,15 @@ local function processDirtyCheckStep(link, sub, stack, checkDepth)
     if isDirty then
         dirty = true
     elseif isMutOrDirty then
+        local subs = dep.subs
         if reactive.update(dep) then
-            local subs = dep.subs
-            if subs.nextSub then
+            if subs and subs.nextSub then
                 reactive.shallowPropagate(subs)
             end
             dirty = true
         end
     elseif isMutOrPending then
-        if link.nextSub or link.prevSub then
-            stack = { value = link, prev = stack }
-        end
+        stack = { value = link, prev = stack }
 
         link = dep.deps
         sub = dep
@@ -819,7 +833,7 @@ function reactive.checkDirty(link, sub)
             processDirtyCheckStep(link, sub, stack, checkDepth)
 
         if shouldReturn then
-            return dirty
+            return dirty and sub.flags ~= 0
         end
 
         if not shouldContinue then
@@ -977,12 +991,12 @@ function reactive.notify(effect)
     -- Collect all inner effects (effects with subs) in a chain
     -- 在链中收集所有内部副作用（具有subs的副作用）
     repeat
+        insertIndex = insertIndex + 1
+        g_queued[insertIndex] = effect
+
         -- Clear the Watching flag
         -- 清除监视标志
         effect.flags = bit.band(effect.flags, bit.bnot(ReactiveFlags.Watching))
-
-        insertIndex = insertIndex + 1
-        g_queued[insertIndex] = effect
 
         -- Move to the next inner effect if it exists and is watching
         -- 如果存在下一个内部副作用且正在监视，则移至该副作用
@@ -1465,6 +1479,7 @@ local function trigger(fn)
 
     -- Trigger updates for all collected dependencies
     -- 为所有收集的依赖触发更新
+    sub.flags = ReactiveFlags.None
     local link = sub.deps
     while link do
         local dep = link.dep
@@ -1477,9 +1492,6 @@ local function trigger(fn)
         -- 如果依赖有订阅者，则传播更新
         local subs = dep.subs
         if subs then
-            -- Reset flags before propagate to prevent the trigger function sub from being notified
-            -- 在传播前重置标志位，防止 trigger 函数的临时订阅者被通知
-            sub.flags = ReactiveFlags.None
             reactive.propagate(subs)
             reactive.shallowPropagate(subs)
         end
