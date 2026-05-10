@@ -776,13 +776,12 @@ end
  * @param sub: Current subscriber being processed / 当前正在处理的订阅者
  * @param stack: Stack for managing nested checks / 用于管理嵌套检查的栈
  * @param checkDepth: Current check depth / 当前检查深度
+ * @param dirty: Current dirty state (carried across iterations) / 当前脏状态（跨迭代传递）
  * @return: Updated values {link, sub, stack, checkDepth, dirty, shouldReturn, shouldContinue}
 ]]
-local function processDirtyCheckStep(link, sub, stack, checkDepth)
+local function processDirtyCheckStep(link, sub, stack, checkDepth, dirty)
     local dep = link.dep
     local depFlags = dep.flags
-
-    local dirty = false
     local isDirty = bit.band(sub.flags, ReactiveFlags.Dirty) > 0
     local bit_mut_or_dirty = bit.bor(ReactiveFlags.Mutable, ReactiveFlags.Dirty)
     local bit_mut_or_pending = bit.bor(ReactiveFlags.Mutable, ReactiveFlags.Pending)
@@ -826,11 +825,12 @@ end
 function reactive.checkDirty(link, sub)
     local stack = nil
     local checkDepth = 0
+    local dirty = false
 
     while true do
-        local dirty, shouldReturn, shouldContinue
+        local shouldReturn, shouldContinue
         link, sub, stack, checkDepth, dirty, shouldReturn, shouldContinue =
-            processDirtyCheckStep(link, sub, stack, checkDepth)
+            processDirtyCheckStep(link, sub, stack, checkDepth, dirty)
 
         if shouldReturn then
             return dirty and sub.flags ~= 0
