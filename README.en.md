@@ -1,6 +1,6 @@
 # Alien Signals - Lua Reactive Programming System
 
-**Version: 3.1.2** - Compatible with alien-signals v3.1.2
+**Version: 3.2.0** - Compatible with alien-signals v3.2.0
 
 [简体中文 README](README.md)
 
@@ -25,7 +25,7 @@ Alien Signals is an efficient reactive programming system. It provides automatic
 3. Effect
    - Functions automatically executed when reactive values change
    - Used to handle side effects, such as updating UI, sending network requests, etc.
-   - Supports cleanup and unsubscription
+   - Supports returning cleanup functions that run before reruns and on stop
 
 4. EffectScope
    - Used to batch manage and clean up multiple reactive effect functions
@@ -51,6 +51,9 @@ end)
 local stopEffect = effect(function()
     print("Count:", count())
     print("Doubled:", doubled())
+    return function()
+        print("Clean up previous effect")
+    end
 end)
 -- Output: Count: 0, Doubled: 0
 
@@ -59,7 +62,7 @@ count(1)  -- Output: Count: 1, Doubled: 2
 count(2)  -- Output: Count: 2, Doubled: 4
 
 -- Stop effect listening
-stopEffect()
+stopEffect() -- Runs the last returned cleanup function
 count(3)  -- Won't trigger any output
 
 -- Using effect scope

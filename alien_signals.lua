@@ -2,8 +2,8 @@
  * Alien Signals - A reactive programming system for Lua
  * Alien Signals - Lua 响应式编程系统
  *
- * Version: 3.1.2 (compatible with alien-signals v3.1.2)
- * 版本: 3.1.2 (兼容 alien-signals v3.1.2)
+ * Version: 3.2.0 (compatible with alien-signals v3.2.0)
+ * 版本: 3.2.0 (兼容 alien-signals v3.2.0)
  *
  * Derived from https://github.com/stackblitz/alien-signals
  * 源自 https://github.com/stackblitz/alien-signals
@@ -86,6 +86,7 @@ local ReactiveFlags = {
  * 它在访问信号时启用自动依赖收集。
 ]]
 local g_activeSub = nil    -- Current active effect or computed value / 当前活动的副作用或计算值
+local g_runDepth = 0       -- Depth of currently running effects/computeds / 当前正在运行的副作用/计算深度
 
 --[[
  * Queue for batched effect execution
@@ -286,6 +287,13 @@ function reactive.run(e)
         return
     end
 
+    if e.cleanup then
+        reactive.runCleanup(e)
+        if e.flags == 0 then
+            return
+        end
+    end
+
     -- Increment global version counter for this tracking cycle
     -- 为此跟踪周期递增全局版本计数器
     g_currentVersion = g_currentVersion + 1
@@ -304,7 +312,9 @@ function reactive.run(e)
 
     -- Execute the effect function safely
     -- 安全地执行副作用函数
-    local result, err = pcall(e.fn)
+    g_runDepth = g_runDepth + 1
+    local result, cleanup = pcall(e.fn)
+    g_runDepth = g_runDepth - 1
 
     -- Restore previous state and finish tracking (finally block)
     -- 恢复之前的状态并完成跟踪（类似 finally 块）
@@ -321,8 +331,10 @@ function reactive.run(e)
     -- Re-throw error so flush() can handle queue cleanup
     -- 重新抛出错误，以便 flush() 可以处理队列清理
     if not result then
-        error(err)
+        error(cleanup)
     end
+
+    e.cleanup = cleanup
 end
 
 --[[
@@ -514,7 +526,7 @@ end
  * 该函数封装了复杂的标志处理逻辑，确定订阅者应如何响应依赖变化。
  * 它处理各种状态，如递归检查、脏标记和待处理更新。
 ]]
-local function processSubscriberFlags(sub, flags, link)
+local function processSubscriberFlags(sub, flags, link, innerWrite)
     -- Check if subscriber is mutable or watching (flags 1 | 2 = 3)
     -- 检查订阅者是否可变或正在监视（标志 1 | 2 = 3）
     if not bit.band(flags, 3) then
@@ -530,6 +542,9 @@ local function processSubscriberFlags(sub, flags, link)
         -- Set pending flag (32)
         -- 设置待处理标志
         sub.flags = bit.bor(flags, 32)
+        if innerWrite then
+            sub.flags = bit.bor(sub.flags, ReactiveFlags.Recursed)
+        end
         return flags
     end
 
@@ -571,10 +586,10 @@ end
  * @param link: Link connecting dependency and subscriber / 连接依赖和订阅者的链接
  * @return: Subscriber's children (subs) if propagation should continue / 如果应该继续传播则返回订阅者的子级
 ]]
-local function handleSubscriberPropagation(sub, flags, link)
+local function handleSubscriberPropagation(sub, flags, link, innerWrite)
     -- Process subscriber flags and get updated flags
     -- 处理订阅者标志并获取更新的标志
-    local processedFlags = processSubscriberFlags(sub, flags, link)
+    local processedFlags = processSubscriberFlags(sub, flags, link, innerWrite)
 
     -- Notify if subscriber is watching
     -- 如果订阅者正在监视则通知
@@ -602,7 +617,7 @@ end
  * 该函数遍历订阅者链并通知所有受影响的订阅者依赖变化。
  * 它使用简化的基于栈的方法来高效处理嵌套依赖。
 ]]
-function reactive.propagate(link)
+function reactive.propagate(link, innerWrite)
     local next = link.nextSub
     local stack = nil
 
@@ -611,7 +626,7 @@ function reactive.propagate(link)
     repeat
         repeat
             local sub = link.sub
-            local subSubs = handleSubscriberPropagation(sub, sub.flags, link)
+            local subSubs = handleSubscriberPropagation(sub, sub.flags, link, innerWrite)
 
             -- Handle mutable subscribers (exactly matching TypeScript logic)
             -- 处理可变订阅者（精确匹配TypeScript逻辑）
@@ -909,14 +924,12 @@ function reactive.updateComputed(c)
     local oldValue = c.value
     local newValue = oldValue
 
+    g_runDepth = g_runDepth + 1
     local result, err = pcall(function()
         newValue = c.getter(oldValue)
         c.value = newValue
     end)
-
-    if not result then
-        print("Error in computed: " .. err)
-    end
+    g_runDepth = g_runDepth - 1
 
     g_activeSub = prevSub
 
@@ -928,6 +941,10 @@ function reactive.updateComputed(c)
     -- 清除陈旧依赖
     reactive.purgeDeps(c)
 
+    if not result then
+        error(err)
+    end
+
     return newValue ~= oldValue
 end
 
@@ -935,13 +952,18 @@ end
 -- @param signal: Signal or Computed object
 -- @return: Boolean indicating whether the value changed
 function reactive.update(signal)
-    if signal.getter then
+    if signal.__type == COMPUTED_MARKER or signal.getter then
         -- For computed values, use the specialized update function
         return reactive.updateComputed(signal)
     end
 
-    -- For signals, update directly
-    return reactive.updateSignal(signal)
+    if signal.__type == SIGNAL_MARKER or signal.currentValue ~= nil or signal.pendingValue ~= nil then
+        -- For signals, update directly
+        return reactive.updateSignal(signal)
+    end
+
+    signal.flags = ReactiveFlags.Mutable
+    return true
 end
 
 --[[
@@ -1057,7 +1079,7 @@ local function signalOper(this, ...)
             -- 如果有订阅者则通知它们
             local subs = this.subs
             if subs then
-                reactive.propagate(subs)
+                reactive.propagate(subs, g_runDepth ~= 0)
                 -- If not in batch mode, execute effects immediately
                 -- 如果不在批量模式下，立即执行副作用
                 if g_batchDepth == 0 then
@@ -1082,12 +1104,8 @@ local function signalOper(this, ...)
         -- Register this signal as a dependency of the current subscriber, if any
         -- 如果有当前订阅者，将此信号注册为其依赖
         local sub = g_activeSub
-        while sub do
-            if bit.band(sub.flags, 3) > 0 then  -- Mutable | Watching
-                reactive.link(this, sub, g_currentVersion)
-                break
-            end
-            sub = sub.subs and sub.subs.sub or nil
+        if sub then
+            reactive.link(this, sub, g_currentVersion)
         end
 
         return this.currentValue
@@ -1189,9 +1207,11 @@ local function computedOper(this)
         -- 设置 Mutable 和 RecursedCheck 标志以防止首次运行时递归
         this.flags = bit.bor(ReactiveFlags.Mutable, ReactiveFlags.RecursedCheck)
         local prevSub = reactive.setActiveSub(this)
+        g_runDepth = g_runDepth + 1
         local success, result = pcall(function()
             return this.getter()
         end)
+        g_runDepth = g_runDepth - 1
         g_activeSub = prevSub
         -- Clear RecursedCheck flag after first run
         -- 首次运行后清除 RecursedCheck 标志
@@ -1199,12 +1219,13 @@ local function computedOper(this)
         if success then
             this.value = result
         else
-            print("Error in computed initialization: " .. result)
+            error(result)
         end
     end
 
-    if g_activeSub then
-        reactive.link(this, g_activeSub, g_currentVersion)
+    local sub = g_activeSub
+    if sub then
+        reactive.link(this, sub, g_currentVersion)
     end
 
     return this.value
@@ -1298,10 +1319,30 @@ end
  * 3. 清除所有状态标志以标记为非活动
 ]]
 local function effectOper(this)
+    if this.cleanup then
+        reactive.runCleanup(this)
+    end
     reactive.effectScopeOper(this)
     this.flags = ReactiveFlags.None
 end
 reactive.effectOper = effectOper
+
+function reactive.runCleanup(e)
+    local cleanup = e.cleanup
+    e.cleanup = nil
+    if type(cleanup) ~= "function" then
+        return
+    end
+
+    local prevSub = g_activeSub
+    g_activeSub = nil
+    local success, err = pcall(cleanup)
+    g_activeSub = prevSub
+
+    if not success then
+        error(err)
+    end
+end
 
 --[[
  * Creates a reactive effect that runs immediately and re-runs when dependencies change
@@ -1332,6 +1373,7 @@ local function effect(fn)
     local e = {
         __type = EFFECT_MARKER,     -- Type marker for isEffect / isEffect的类型标记
         fn = fn,                    -- The effect function / 副作用函数
+        cleanup = nil,              -- Cleanup returned by the effect function / 副作用函数返回的清理函数
         subs = nil,                 -- Subscribers (if this effect is a dependency) / 订阅者（如果此副作用是依赖）
         subsTail = nil,             -- End of subscribers list / 订阅者列表的末尾
         deps = nil,                 -- Dependencies linked list (head) / 依赖链表（头部）
@@ -1350,7 +1392,9 @@ local function effect(fn)
 
     -- Run the effect for the first time, collecting dependencies
     -- 第一次运行副作用，收集依赖
-    local success, err = pcall(fn)
+    g_runDepth = g_runDepth + 1
+    local success, cleanup = pcall(fn)
+    g_runDepth = g_runDepth - 1
 
     -- Restore previous subscriber
     -- 恢复之前的订阅者
@@ -1361,8 +1405,10 @@ local function effect(fn)
     e.flags = bit.band(e.flags, bit.bnot(ReactiveFlags.RecursedCheck))
 
     if not success then
-        error(err)
+        error(cleanup)
     end
+
+    e.cleanup = cleanup
 
     -- Return the cleanup function
     -- 返回清理函数
@@ -1399,7 +1445,7 @@ local function effectScope(fn)
         depsTail = nil,       -- Dependencies linked list (tail) / 依赖链表（尾部）
         subs = nil,           -- Subscribers (child effects) / 订阅者（子副作用）
         subsTail = nil,       -- End of subscribers list / 订阅者列表的末尾
-        flags = ReactiveFlags.None, -- No special flags needed / 不需要特殊标志
+        flags = ReactiveFlags.Mutable, -- Effect scopes are mutable graph nodes / 副作用作用域是可变图节点
     }
 
     -- Set this scope as active subscriber and link to parent if any
@@ -1473,10 +1519,6 @@ local function trigger(fn)
     -- 恢复之前的订阅者并触发更新
     reactive.setActiveSub(prevSub)
 
-    if not success then
-        error(err)
-    end
-
     -- Trigger updates for all collected dependencies
     -- 为所有收集的依赖触发更新
     sub.flags = ReactiveFlags.None
@@ -1492,7 +1534,7 @@ local function trigger(fn)
         -- 如果依赖有订阅者，则传播更新
         local subs = dep.subs
         if subs then
-            reactive.propagate(subs)
+            reactive.propagate(subs, g_runDepth ~= 0)
             reactive.shallowPropagate(subs)
         end
     end
@@ -1501,6 +1543,10 @@ local function trigger(fn)
     -- 如果不在批处理中，则刷新排队的副作用
     if g_batchDepth == 0 then
         reactive.flush()
+    end
+
+    if not success then
+        error(err)
     end
 end
 

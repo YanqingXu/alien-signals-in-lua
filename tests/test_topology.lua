@@ -411,10 +411,10 @@ test('should keep graph consistent on errors during activation', function()
     end)
     local c = computed(function() return a() end)
 
-    -- In this Lua implementation, errors in computed are caught and logged
-    -- So b() will return nil instead of throwing
-    local result = b()
-    expect(result == nil).toBe(true)
+    local success = pcall(function()
+        b()
+    end)
+    expect(success).toBe(false)
 
     a(1)
     expect(c()).toBe(1)
@@ -434,24 +434,17 @@ test('should keep graph consistent on errors in computeds', function()
     expect(c()).toBe(0)
 
     a(1)
-    -- In this Lua implementation, errors in computed are caught and logged
-    -- So b() will return nil instead of throwing
-    local result = b()
-    print("b() result after error:", result)
-    -- Note: In our implementation, computed might not return nil but the old value
+    local success = pcall(function()
+        b()
+    end)
+    expect(success).toBe(false)
 
     a(2)
-    -- Since b() had an error, let's see what happens
     local bResult = b()
     local cResult = c()
-    print("After a(2) - b() result:", bResult, "c() result:", cResult)
 
-    -- The computed should recover after the error condition is gone
-    if cResult == 2 then
-        expect(c()).toBe(2)
-    else
-        print("c() did not return expected value 2, got:", cResult)
-    end
+    expect(bResult).toBe(2)
+    expect(cResult).toBe(2)
     print("test passed\n")
 end)
 

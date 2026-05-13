@@ -1,6 +1,6 @@
 # Alien Signals - Lua响应式编程系统
 
-**版本: 3.1.2** - 兼容 alien-signals v3.1.2
+**版本: 3.2.0** - 兼容 alien-signals v3.2.0
 
 [English README](README.en.md)
 
@@ -25,7 +25,7 @@ Alien Signals是一个高效的响应式编程系统，它通过简洁而强大�
 3. Effect（副作用）
    - 响应式值变化时自动执行的函数
    - 用于处理副作用，如更新UI、发送网络请求等
-   - 支持清理和取消订阅
+   - 支持返回清理函数，并在重跑前或停止时自动执行
 
 4. EffectScope（副作用作用域）
    - 用于批量管理和清理多个响应式副作用函数
@@ -51,6 +51,9 @@ end)
 local stopEffect = effect(function()
     print("计数:", count())
     print("双倍:", doubled())
+    return function()
+        print("清理上一次副作用")
+    end
 end)
 -- 输出: 计数: 0, 双倍: 0
 
@@ -59,7 +62,7 @@ count(1)  -- 输出: 计数: 1, 双倍: 2
 count(2)  -- 输出: 计数: 2, 双倍: 4
 
 -- 停止副作用监听
-stopEffect()
+stopEffect() -- 会执行最后一次返回的清理函数
 count(3)  -- 不会触发任何输出
 
 -- 使用副作用作用域
