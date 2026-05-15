@@ -1,6 +1,6 @@
 # Alien Signals - Lua Reactive Programming System
 
-**Version: 3.2.0** - Compatible with alien-signals v3.2.0
+**Version: 3.2.1** - Compatible with alien-signals v3.2.1
 
 [简体中文 README](README.md)
 

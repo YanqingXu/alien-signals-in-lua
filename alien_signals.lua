@@ -2,8 +2,8 @@
  * Alien Signals - A reactive programming system for Lua
  * Alien Signals - Lua 响应式编程系统
  *
- * Version: 3.2.0 (compatible with alien-signals v3.2.0)
- * 版本: 3.2.0 (兼容 alien-signals v3.2.0)
+ * Version: 3.2.1 (compatible with alien-signals v3.2.1)
+ * 版本: 3.2.1 (兼容 alien-signals v3.2.1)
  *
  * Derived from https://github.com/stackblitz/alien-signals
  * 源自 https://github.com/stackblitz/alien-signals
@@ -75,6 +75,12 @@ local ReactiveFlags = {
     Dirty = 16,        -- 0010000: Value has changed and needs update / 值已改变需要更新
     Pending = 32,      -- 0100000: Might be dirty, needs checking / 可能是脏的，需要检查
 }
+
+-- Marks parents that contain child effects/scopes. This bit is outside
+-- ReactiveFlags and is used to run child disposal before parent cleanup.
+-- 标记包含子副作用/作用域的父节点。该位不属于 ReactiveFlags，
+-- 用于在父级 cleanup 前先释放子级。
+local HasChildEffect = 64
 
 --[[
  * Global state for tracking current active subscriber
@@ -279,12 +285,16 @@ function reactive.run(e)
     until true
 
     if not shouldRun then
-        -- Restore Watching flag if effect was not disposed during checkDirty
-        -- 如果副作用在 checkDirty 期间未被处置，恢复监视标志
-        if e.flags ~= 0 then
-            e.flags = ReactiveFlags.Watching
+        -- Restore Watching flag and preserve child-effect tracking if still active
+        -- 如果仍处于活动状态，恢复监视标志并保留子副作用标记
+        if e.deps ~= nil then
+            e.flags = bit.bor(ReactiveFlags.Watching, bit.band(flags, HasChildEffect))
         end
         return
+    end
+
+    if bit.band(flags, HasChildEffect) ~= 0 then
+        reactive.disposeChildDeps(e)
     end
 
     if e.cleanup then
@@ -730,6 +740,27 @@ function reactive.purgeDeps(sub)
     end
 end
 
+function reactive.disposeAllDepsInReverse(sub)
+    local link = sub.depsTail
+    while link do
+        local prev = link.prevDep
+        reactive.unlink(link, sub)
+        link = prev
+    end
+end
+
+function reactive.disposeChildDeps(sub)
+    local link = sub.depsTail
+    while link do
+        local prev = link.prevDep
+        local dep = link.dep
+        if dep.__type ~= COMPUTED_MARKER and dep.__type ~= SIGNAL_MARKER and not dep.getter then
+            reactive.unlink(link, sub)
+        end
+        link = prev
+    end
+end
+
 --[[
  * Processes the stack unwinding phase during dependency checking
  * 处理依赖检查期间的栈展开阶段
@@ -907,9 +938,9 @@ function reactive.updateSignal(signal)
 end
 
 function reactive.updateComputed(c)
-    -- Increment global version counter for this tracking cycle
-    -- 为此跟踪周期递增全局版本计数器
-    g_currentVersion = g_currentVersion + 1
+    if bit.band(c.flags, HasChildEffect) ~= 0 then
+        reactive.disposeChildDeps(c)
+    end
 
     -- Reset dependency tail to collect dependencies from scratch
     -- 重置依赖尾部以从头收集依赖
@@ -924,12 +955,13 @@ function reactive.updateComputed(c)
     local oldValue = c.value
     local newValue = oldValue
 
-    g_runDepth = g_runDepth + 1
     local result, err = pcall(function()
+        -- Increment global version counter for this tracking cycle
+        -- 为此跟踪周期递增全局版本计数器
+        g_currentVersion = g_currentVersion + 1
         newValue = c.getter(oldValue)
         c.value = newValue
     end)
-    g_runDepth = g_runDepth - 1
 
     g_activeSub = prevSub
 
@@ -984,12 +1016,18 @@ end
  * - 副作用/作用域：执行完整清理以防止内存泄漏
 ]]
 function reactive.unwatched(node)
-    if bit.band(node.flags, ReactiveFlags.Mutable) == 0 then
+    if node.__type == COMPUTED_MARKER or node.getter then
+        if node.depsTail then
+            node.flags = bit.bor(ReactiveFlags.Mutable, ReactiveFlags.Dirty)
+            reactive.disposeAllDepsInReverse(node)
+        end
+    elseif node.__type == SIGNAL_MARKER then
+        -- Signals do not own dependencies that need disposal.
+        -- 信号不拥有需要释放的依赖。
+    elseif node.__type == EFFECT_MARKER or node.fn then
+        reactive.effectOper(node)
+    else
         reactive.effectScopeOper(node)
-    elseif node.depsTail then
-        node.depsTail = nil
-        node.flags = bit.bor(ReactiveFlags.Mutable, ReactiveFlags.Dirty)
-        reactive.purgeDeps(node)
     end
 end
 
@@ -1207,11 +1245,9 @@ local function computedOper(this)
         -- 设置 Mutable 和 RecursedCheck 标志以防止首次运行时递归
         this.flags = bit.bor(ReactiveFlags.Mutable, ReactiveFlags.RecursedCheck)
         local prevSub = reactive.setActiveSub(this)
-        g_runDepth = g_runDepth + 1
         local success, result = pcall(function()
             return this.getter()
         end)
-        g_runDepth = g_runDepth - 1
         g_activeSub = prevSub
         -- Clear RecursedCheck flag after first run
         -- 首次运行后清除 RecursedCheck 标志
@@ -1284,14 +1320,13 @@ end
  * 2. 如果有的话，从父作用域取消链接
 ]]
 function reactive.effectScopeOper(this)
-    -- Clear depsTail and flags
-    -- 清除 depsTail 和 flags
-    this.depsTail = nil
+    -- Clear flags before disposing dependencies in reverse creation order
+    -- 在按创建逆序释放依赖之前清除标志
     this.flags = ReactiveFlags.None
 
-    -- Unlink all dependencies using purgeDeps
-    -- 使用 purgeDeps 取消所有依赖的链接
-    reactive.purgeDeps(this)
+    -- Dispose child effects/scopes before unlinking from the parent
+    -- 先释放子副作用/作用域，再从父级取消链接
+    reactive.disposeAllDepsInReverse(this)
 
     -- If this effect/scope is a dependency for other effects, unlink it
     -- 如果此副作用/作用域是其他副作用的依赖，取消其链接
@@ -1319,10 +1354,10 @@ end
  * 3. 清除所有状态标志以标记为非活动
 ]]
 local function effectOper(this)
+    reactive.effectScopeOper(this)
     if this.cleanup then
         reactive.runCleanup(this)
     end
-    reactive.effectScopeOper(this)
     this.flags = ReactiveFlags.None
 end
 reactive.effectOper = effectOper
@@ -1388,6 +1423,7 @@ local function effect(fn)
     local prevSub = reactive.setActiveSub(e)
     if prevSub then
         reactive.link(e, prevSub, 0)
+        prevSub.flags = bit.bor(prevSub.flags, HasChildEffect)
     end
 
     -- Run the effect for the first time, collecting dependencies
@@ -1453,6 +1489,7 @@ local function effectScope(fn)
     local prevSub = reactive.setActiveSub(e)
     if prevSub then
         reactive.link(e, prevSub, 0)
+        prevSub.flags = bit.bor(prevSub.flags, HasChildEffect)
     end
 
     -- Execute the function to create effects within this scope
