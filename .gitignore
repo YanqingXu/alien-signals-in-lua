@@ -1,0 +1,33 @@
+# Local editor and assistant state
+.claude/
+.idea/
+.vscode/*
+!.vscode/launch.json
+
+# Lua bytecode and native build outputs
+*.luac
+*.so
+*.dll
+*.dylib
+
+# LuaRocks/package artifacts
+*.rock
+*.rockspec
+*.src.rock
+*.zip
+
+# Test and coverage output
+coverage/
+luacov.*
+*.log
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local environment files
+.env
+.env.*
+
+changes
