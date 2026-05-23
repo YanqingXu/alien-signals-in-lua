@@ -7,6 +7,8 @@ graph.lua
 
 local graph = {}
 
+local tracer = require("refactored.tracer")
+
 local onDependencyBecameUnwatched = function() end
 
 -- 注入依赖源无人订阅时的回调。
@@ -95,6 +97,12 @@ function graph.connect(dependency, subscriber, version)
     local previousDependencyLink = subscriber.depsTail
 
     if previousDependencyLink and previousDependencyLink.dep == dependency then
+        tracer.emit("graph:reuse", dependency, {
+            link = previousDependencyLink,
+            dep = dependency,
+            sub = subscriber,
+            reason = "same-tail-dependency",
+        })
         return
     end
 
@@ -108,6 +116,12 @@ function graph.connect(dependency, subscriber, version)
     if nextDependencyLink and nextDependencyLink.dep == dependency then
         nextDependencyLink.version = version
         subscriber.depsTail = nextDependencyLink
+        tracer.emit("graph:reuse", dependency, {
+            link = nextDependencyLink,
+            dep = dependency,
+            sub = subscriber,
+            reason = "next-dependency-link",
+        })
         return
     end
 
@@ -116,6 +130,12 @@ function graph.connect(dependency, subscriber, version)
         and previousSubscriberLink.version == version
         and previousSubscriberLink.sub == subscriber
     then
+        tracer.emit("graph:reuse", dependency, {
+            link = previousSubscriberLink,
+            dep = dependency,
+            sub = subscriber,
+            reason = "same-version-subscriber",
+        })
         return
     end
 
@@ -131,6 +151,12 @@ function graph.connect(dependency, subscriber, version)
 
     insertDepLink(subscriber, link, previousDependencyLink, nextDependencyLink)
     appendSubLink(dependency, link, previousSubscriberLink)
+
+    tracer.emit("graph:connect", dependency, {
+        link = link,
+        dep = dependency,
+        sub = subscriber,
+    })
 end
 
 --[[
@@ -143,6 +169,12 @@ end
 function graph.unlink(link, explicitSubscriber)
     local subscriber = explicitSubscriber or link.sub
     local dependency = link.dep
+
+    tracer.emit("graph:unlink", dependency, {
+        link = link,
+        dep = dependency,
+        sub = subscriber,
+    })
 
     local previousDependencyLink = link.prevDep
     local nextDependencyLink = link.nextDep
@@ -179,6 +211,9 @@ function graph.unlink(link, explicitSubscriber)
     link.nextSub = nil
 
     if dependency.subs == nil then
+        tracer.emit("graph:unwatched", dependency, {
+            dep = dependency,
+        })
         onDependencyBecameUnwatched(dependency)
     end
 

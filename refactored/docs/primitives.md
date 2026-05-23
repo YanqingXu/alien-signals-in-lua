@@ -165,7 +165,7 @@ sequenceDiagram
 
 ## 模块间依赖关系
 
-- **依赖**：`bit`、`constants`、`graph`、`scheduler`、`engine`。
+- **依赖**：`bit`、`constants`、`graph`、`scheduler`、`engine`、`tracer`。
 - **被依赖**：`init`。
 - **反向注入**：`stopNode → engine.setStopHandler`。
 

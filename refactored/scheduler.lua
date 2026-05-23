@@ -8,6 +8,7 @@ scheduler.lua
 local bit = require("bit")
 
 local constants = require("refactored.constants")
+local tracer = require("refactored.tracer")
 local ReactiveFlags = constants.ReactiveFlags
 
 local scheduler = {}
@@ -41,9 +42,14 @@ function scheduler.enqueueEffect(effectNode)
     local collected = {}
 
     while effectNode and constants.isWatchingEffect(effectNode) do
+        local flagsBefore = effectNode.flags
         collected[#collected + 1] = effectNode
         effectNode.isQueued = true
         constants.removeFlags(effectNode, ReactiveFlags.Watching)
+        tracer.emit("effect:enqueue", effectNode, {
+            flagsBefore = flagsBefore,
+            flagsAfter = effectNode.flags,
+        })
 
         local innerEffectLink = effectNode.subs
         effectNode = innerEffectLink and innerEffectLink.sub or nil
@@ -57,6 +63,10 @@ end
 
 -- 消费队列，并在出错时恢复剩余 effect。
 function scheduler.flush()
+    tracer.enter("flush", nil, {
+        queueSize = queuedEffectCount - queueReadIndex,
+    })
+
     local ok, err = pcall(function()
         while queueReadIndex < queuedEffectCount do
             queueReadIndex = queueReadIndex + 1
@@ -64,6 +74,9 @@ function scheduler.flush()
             queuedEffects[queueReadIndex] = nil
 
             if effectNode then
+                tracer.emit("flush:run", effectNode, {
+                    queueSize = queuedEffectCount - queueReadIndex,
+                })
                 runEffectHandler(effectNode)
             end
         end
@@ -78,11 +91,19 @@ function scheduler.flush()
         if effectNode then
             effectNode.isQueued = false
             constants.addFlags(effectNode, bit.bor(ReactiveFlags.Watching, ReactiveFlags.Recursed))
+            tracer.emit("flush:restore", effectNode, {
+                flagsAfter = effectNode.flags,
+                reason = "error-recovery",
+            })
         end
     end
 
     queueReadIndex = 0
     queuedEffectCount = 0
+
+    tracer.leave("flush", nil, {
+        result = ok and "ok" or "error",
+    })
 
     if not ok then
         error(err)
@@ -92,11 +113,17 @@ end
 -- 进入一层 batch。
 function scheduler.startBatch()
     batchDepth = batchDepth + 1
+    tracer.emit("batch:start", nil, {
+        batchDepth = batchDepth,
+    })
 end
 
 -- 退出一层 batch，最外层结束时 flush。
 function scheduler.endBatch()
     batchDepth = batchDepth - 1
+    tracer.emit("batch:end", nil, {
+        batchDepth = batchDepth,
+    })
     if batchDepth == 0 then
         scheduler.flush()
     end

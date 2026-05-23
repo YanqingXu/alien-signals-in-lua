@@ -222,7 +222,7 @@ debug/测试专用的不变量检查。它们不会修改图结构，只验证�
 
 ## 模块间依赖关系
 
-- **依赖**：无（甚至不依赖 `constants`，因为 graph 只摆指针、不读 flags）。
+- **依赖**：`tracer`。graph 只摆指针、不读 flags；tracer 默认关闭，只用于发出可选事件。
 - **被依赖**：`engine`、`primitives`。`scheduler` 不直接使用 graph。
 - **反向回调**：`engine.handleUnwatched` 通过
   `graph.setUnwatchedHandler` 注入。

@@ -11,6 +11,7 @@ local constants = require("refactored.constants")
 local graph = require("refactored.graph")
 local scheduler = require("refactored.scheduler")
 local engine = require("refactored.engine")
+local tracer = require("refactored.tracer")
 
 local ReactiveFlags = constants.ReactiveFlags
 local HAS_CHILD_EFFECT = constants.HAS_CHILD_EFFECT
@@ -54,8 +55,17 @@ local function signalOp(signalNode, ...)
         local nextValue = select(1, ...)
 
         if nextValue ~= signalNode.pendingValue then
+            local flagsBefore = signalNode.flags
+            local previousValue = signalNode.pendingValue
             signalNode.pendingValue = nextValue
             constants.setFlags(signalNode, bit.bor(ReactiveFlags.Mutable, ReactiveFlags.Dirty))
+            tracer.emit("signal:set", signalNode, {
+                from = tracer.value(previousValue),
+                to = tracer.value(nextValue),
+                changed = true,
+                flagsBefore = flagsBefore,
+                flagsAfter = signalNode.flags,
+            })
 
             if signalNode.subs then
                 engine.propagate(signalNode.subs, engine.isInsideReactiveRun())
@@ -63,6 +73,12 @@ local function signalOp(signalNode, ...)
                     scheduler.flush()
                 end
             end
+        else
+            tracer.emit("signal:set-skip", signalNode, {
+                value = tracer.value(nextValue),
+                changed = false,
+                reason = "same-pending-value",
+            })
         end
 
         return nil
@@ -74,6 +90,9 @@ local function signalOp(signalNode, ...)
         end
     end
 
+    tracer.emit("signal:read", signalNode, {
+        value = tracer.value(signalNode.currentValue),
+    })
     engine.trackRead(signalNode)
     return signalNode.currentValue
 end
@@ -84,11 +103,17 @@ function primitives.signal(initialValue)
     signalNode.currentValue = initialValue
     signalNode.pendingValue = initialValue
 
+    tracer.emit("node:create", signalNode, {
+        value = tracer.value(initialValue),
+    })
+
     return constants.bind(signalOp, signalNode)
 end
 
 -- computed 的懒读取实现。
 local function computedOp(computedNode)
+    tracer.emit("computed:read", computedNode)
+
     if engine.computedNeedsRefresh(computedNode) then
         if engine.updateComputed(computedNode, true) and computedNode.subs then
             engine.markDirty(computedNode.subs)
@@ -107,16 +132,29 @@ function primitives.computed(getter)
     computedNode.value = nil
     computedNode.getter = getter
 
+    tracer.emit("node:create", computedNode)
+
     return constants.bind(computedOp, computedNode)
 end
 
 -- 停止 effect：先停子树，再执行自身 cleanup。
 local function stopEffect(effectNode)
-    stopScopeNode(effectNode)
-    if effectNode.cleanup then
-        engine.runCleanup(effectNode)
+    tracer.enter("effect:stop", effectNode)
+    local ok, err = pcall(function()
+        stopScopeNode(effectNode)
+        if effectNode.cleanup then
+            engine.runCleanup(effectNode)
+        end
+        constants.setFlags(effectNode, ReactiveFlags.None)
+    end)
+    tracer.leave("effect:stop", effectNode, {
+        result = ok and "ok" or "error",
+        flagsAfter = effectNode.flags,
+    })
+
+    if not ok then
+        error(err)
     end
-    constants.setFlags(effectNode, ReactiveFlags.None)
 end
 
 -- 创建立即执行并自动追踪依赖的 effect。
@@ -128,9 +166,12 @@ function primitives.effect(fn)
     effectNode.fn = fn
     effectNode.cleanup = nil
 
+    tracer.emit("node:create", effectNode)
+
     local parentSubscriber = engine.getActiveSub()
     linkChild(effectNode, parentSubscriber)
 
+    tracer.enter("effect:init", effectNode)
     local ok, cleanupOrError = engine.callWithSub(effectNode, fn)
 
     constants.removeFlags(effectNode, ReactiveFlags.RecursedCheck)
@@ -138,15 +179,24 @@ function primitives.effect(fn)
 
     if not ok then
         stopScopeNode(effectNode)
+        tracer.leave("effect:init", effectNode, {
+            result = "error",
+            flagsAfter = effectNode.flags,
+        })
         error(cleanupOrError)
     end
 
     effectNode.cleanup = cleanupOrError
+    tracer.leave("effect:init", effectNode, {
+        result = "ok",
+        flagsAfter = effectNode.flags,
+    })
     return constants.bind(stopEffect, effectNode)
 end
 
 -- 停止 scope/effect 的共同清理流程。
 stopScopeNode = function(scopeNode)
+    tracer.emit("scope:stop", scopeNode)
     scopeNode.isQueued = false
     constants.setFlags(scopeNode, ReactiveFlags.None)
     graph.unlinkDepsReverse(scopeNode)
@@ -170,17 +220,28 @@ end
 function primitives.effectScope(fn)
     local scopeNode = newSubNode(constants.EFFECT_SCOPE_MARKER, ReactiveFlags.Mutable)
 
+    tracer.emit("node:create", scopeNode)
+
     local parentSubscriber = engine.setActiveSub(scopeNode)
     linkChild(scopeNode, parentSubscriber)
 
+    tracer.enter("scope:init", scopeNode)
     local ok, err = pcall(fn)
     engine.setActiveSub(parentSubscriber)
 
     if not ok then
         stopScopeNode(scopeNode)
+        tracer.leave("scope:init", scopeNode, {
+            result = "error",
+            flagsAfter = scopeNode.flags,
+        })
         error(err)
     end
 
+    tracer.leave("scope:init", scopeNode, {
+        result = "ok",
+        flagsAfter = scopeNode.flags,
+    })
     return constants.bind(stopScopeNode, scopeNode)
 end
 
@@ -197,6 +258,7 @@ function primitives.trigger(fn)
         flags = ReactiveFlags.Watching,
     }
 
+    tracer.enter("trigger", temporarySubscriber)
     local previousSubscriber = engine.setActiveSub(temporarySubscriber)
     local ok, err = pcall(fn)
     engine.setActiveSub(previousSubscriber)
@@ -219,8 +281,15 @@ function primitives.trigger(fn)
     end
 
     if not ok then
+        tracer.leave("trigger", temporarySubscriber, {
+            result = "error",
+        })
         error(err)
     end
+
+    tracer.leave("trigger", temporarySubscriber, {
+        result = "ok",
+    })
 end
 
 -- 判断 callable 是否是 signal。

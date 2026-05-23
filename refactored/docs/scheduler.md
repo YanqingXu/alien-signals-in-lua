@@ -147,7 +147,7 @@ sequenceDiagram
 
 ## 模块间依赖关系
 
-- **依赖**：`bit`、`constants`。
+- **依赖**：`bit`、`constants`、`tracer`。
 - **被依赖**：`engine`（注入回调 + 入队）、`primitives`（写入/trigger 后
   视情况触发 `flush`、暴露 `startBatch`/`endBatch`）。
 - **不依赖** `graph`：scheduler 只通过 `effectNode.subs / sub.sub` 这种

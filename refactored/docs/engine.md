@@ -18,7 +18,7 @@
 local activeSubscriber = nil      -- 当前正在追踪依赖的订阅者
 local runDepth         = 0        -- 嵌套 effect/computed 的层数
 local trackingVersion  = 0        -- 单调递增的追踪世代号
-local stopNode = no-op    -- primitives 注入的"停止 effect/scope"回调
+local stopNodeHandler = no-op -- primitives 注入的"停止 effect/scope"回调
 ```
 
 ## 公共算法概览
@@ -50,7 +50,7 @@ local stopNode = no-op    -- primitives 注入的"停止 effect/scope"回调
 flowchart LR
     subgraph PUSH ["PUSH 阶段 — 写入路径 (廉价)"]
         direction TB
-        W[signal 写入<br/>或 trigger] --> P1[propagate<br/>InvalidationFrom]
+        W[signal 写入<br/>或 trigger] --> P1[propagate]
         P1 --> P2[沿 subs 链 DFS]
         P2 --> P3{是 effect?<br/>Watching}
         P3 -- 是 --> P4[enqueueEffect<br/>仅标记入队]
@@ -60,7 +60,7 @@ flowchart LR
     subgraph PULL ["PULL 阶段 — 读取/刷新路径 (确认)"]
         direction TB
         R[computed 被读取<br/>或 scheduler.flush] --> C1[computedNeedsRefresh<br/>shouldRunEffect]
-        C1 --> C2[checkDependencyChain<br/>ForChanges]
+        C1 --> C2[checkDeps]
         C2 --> C3{真的变了?}
         C3 -- 是 --> C4[重算 / 重跑]
         C3 -- 否 --> C5[撤销 Pending<br/>不做事]
@@ -212,7 +212,7 @@ graph.setUnwatchedHandler(engine.handleUnwatched)
 
 ## 模块间依赖关系
 
-- **依赖**：`bit`、`constants`、`graph`、`scheduler`。
+- **依赖**：`bit`、`constants`、`graph`、`scheduler`、`tracer`。
 - **被依赖**：`primitives`、`init`。
 - **反向注入**：`engine.runQueuedEffect → scheduler`、
   `engine.handleUnwatched → graph`、

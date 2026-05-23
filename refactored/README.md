@@ -2,7 +2,8 @@
 # Alien Signals · 模块化重构版
 
 本目录是 `alien_signals.lua` 单文件实现的模块化重构版本。它把原本约一千行的实现
-拆成五个互相协作的模块，对外保持完全一致的公共 API；外部使用方只需要
+拆成六个互相协作的模块，原有公共 API 保持一致，并额外提供可选 tracing；
+外部使用方只需要
 `require("refactored")`，无需关心内部分层。
 
 ```
@@ -12,14 +13,15 @@ refactored/
 ├── graph.lua       ── 双向链表依赖图：Link 节点的创建、插入、解绑
 ├── scheduler.lua   ── 批量更新 (Batching) 与 effect 调度队列
 ├── engine.lua      ── 响应式核心：activeSub 追踪、传播、脏值检查
-└── primitives.lua  ── 用户侧原语：signal / computed / effect / effectScope / trigger
+├── primitives.lua  ── 用户侧原语：signal / computed / effect / effectScope / trigger
+└── tracer.lua      ── 默认关闭的结构化运行时追踪事件
 ```
 
 ## 模块职责
 
 ### `init.lua` — 统一入口
 
-聚合层。按顺序加载 `constants → scheduler → engine → primitives`，
+聚合层。按顺序加载 `constants → tracer → scheduler → engine → primitives`，
 然后把面向用户的函数集中导出到同一张表里：
 
 - 响应式原语：`signal` / `computed` / `effect` / `effectScope` / `trigger`
@@ -27,6 +29,7 @@ refactored/
 - 批量调度：`startBatch` / `endBatch` / `getBatchDepth`
 - 活动订阅者控制：`getActiveSub` / `setActiveSub`
 - 标志常量：`ReactiveFlags`
+- 运行时追踪：`tracer` / `setTraceHandler` / `clearTraceHandler`
 
 它本身不持有任何状态，只负责"打包发布"。
 
@@ -99,6 +102,20 @@ refactored/
 
 启动末尾还把自身回调注入 `scheduler` 与 `graph`，闭合模块协作环。
 
+### `tracer.lua` — 运行时追踪
+
+默认关闭的教学/调试辅助模块。核心模块在关键路径上发出结构化事件，例如
+`signal:set`、`propagate:visit`、`check:dep`、`effect:run:start`；是否输出、
+输出到哪里、如何格式化，全部由外部 handler 决定。
+
+它提供：
+
+- `setHandler` / `clearHandler` —— 开关追踪。
+- `consoleHandler` / `formatEvent` —— 把事件格式化为缩进文本日志。
+- `nodeLabel` / `linkLabel` / `flagsText` —— 用稳定短标签解释节点、Link 和 flags。
+
+普通运行不启用 handler 时不会打印任何内容。
+
 ### `primitives.lua` — 用户侧 API
 
 把 `engine`、`graph`、`scheduler` 提供的算子组装成最终的响应式原语：
@@ -125,22 +142,25 @@ refactored/
 init.lua
   └─ primitives.lua
         ├─ engine.lua
-        │     ├─ graph.lua ──── constants.lua
-        │     ├─ scheduler.lua ─ constants.lua
+        │     ├─ graph.lua ──── constants.lua + tracer.lua
+        │     ├─ scheduler.lua ─ constants.lua + tracer.lua
+        │     ├─ tracer.lua ─── constants.lua
         │     └─ constants.lua
         ├─ graph.lua
         ├─ scheduler.lua
+        ├─ tracer.lua
         └─ constants.lua
 ```
 
 整体严格分层 + 少量"回调注入"反向连接：
 
 - `constants` 是叶子模块，被所有人依赖，不依赖任何业务模块。
-- `graph` / `scheduler` 只依赖 `constants`。
-- `engine` 依赖 `constants` / `graph` / `scheduler`，并向后两者注入回调
+- `graph` / `scheduler` 依赖 `constants`，并向 `tracer` 发出可选事件。
+- `tracer` 只依赖 `constants`，默认关闭；其它模块只向它发事件。
+- `engine` 依赖 `constants` / `graph` / `scheduler` / `tracer`，并向后两者注入回调
   (`runEffectHandler`、`unwatched handler`) 形成协作环。
-- `primitives` 依赖前面四者，并向 `engine` 注入 `stopNode`。
-- `init` 只依赖 `primitives`、`scheduler`、`engine`、`constants`，
+- `primitives` 依赖前面五者，并向 `engine` 注入 `stopNode`。
+- `init` 只依赖 `primitives`、`scheduler`、`engine`、`constants`、`tracer`，
   仅做 API 聚合。
 
 ## 进一步阅读
@@ -155,3 +175,4 @@ init.lua
 - [`docs/primitives.md`](docs/primitives.md)
 - [`docs/effect-cleanup.md`](docs/effect-cleanup.md)
 - [`docs/from-naive-map-to-link.md`](docs/from-naive-map-to-link.md)
+- [`docs/runtime-tracing.md`](docs/runtime-tracing.md)

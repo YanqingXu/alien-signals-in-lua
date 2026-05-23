@@ -6,6 +6,7 @@ constants、graph、scheduler、engine、primitives 五个职责模块。
 ]]
 
 local constants = require("refactored.constants")
+local tracer = require("refactored.tracer")
 local scheduler = require("refactored.scheduler")
 local engine = require("refactored.engine")
 local primitives = require("refactored.primitives")
@@ -30,4 +31,9 @@ return {
     setActiveSub = engine.setActiveSub,
 
     ReactiveFlags = constants.ReactiveFlags,
+
+    tracer = tracer,
+    setTraceHandler = tracer.setHandler,
+    clearTraceHandler = tracer.clearHandler,
+    formatTraceEvent = tracer.formatEvent,
 }
