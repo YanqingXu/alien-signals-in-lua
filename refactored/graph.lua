@@ -181,6 +181,20 @@ function graph.removeDependencyLink(link, explicitSubscriber)
     return nextDependencyLink
 end
 
+function graph.removeDependencyLinksInReverse(subscriber, shouldRemoveDependency)
+    local link = subscriber.depsTail
+
+    while link do
+        local previousDependencyLink = link.prevDep
+
+        if not shouldRemoveDependency or shouldRemoveDependency(link.dep, link) then
+            graph.removeDependencyLink(link, subscriber)
+        end
+
+        link = previousDependencyLink
+    end
+end
+
 function graph.removeStaleDependencyLinks(subscriber)
     local firstStaleLink
     if subscriber.depsTail then

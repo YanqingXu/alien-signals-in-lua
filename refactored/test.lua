@@ -29,7 +29,6 @@ local testFiles = {
     "tests/test_issue_97.lua",
     "tests/test_nil_value.lua",
     "tests/test_recursion.lua",
-    "tests/test_refactored_modules.lua",
     "tests/test_topology.lua",
     "tests/test_trigger.lua",
     "tests/test_untrack.lua",

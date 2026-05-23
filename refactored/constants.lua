@@ -42,6 +42,10 @@ constants.ReactiveFlags = {
     Pending = 32,
 }
 
+-- 这个位不属于 ReactiveFlags 状态机，只标记节点拥有子 effect/scope。
+-- 重跑或停止父节点时，依靠它先释放子节点，再执行父节点自己的 cleanup。
+constants.HAS_CHILD_EFFECT = 64
+
 local ReactiveFlags = constants.ReactiveFlags
 
 constants.TRACKABLE_FLAGS = bit.bor(ReactiveFlags.Mutable, ReactiveFlags.Watching)

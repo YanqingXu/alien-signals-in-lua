@@ -56,6 +56,15 @@ callable 之后，对应条目可以被 GC 回收。
 把状态压缩进单个整数，让"节点处于哪些组合状态"成为一次 `bit.band`/`bit.bor`，
 是该响应式实现性能优势的根源之一。
 
+### 子 effect 标记：`HAS_CHILD_EFFECT`
+
+`HAS_CHILD_EFFECT = 64` 不属于 `ReactiveFlags` 状态机。它只记录一个节点是否
+在自己的执行过程中创建过子 effect / scope。
+
+这个标记用于 cleanup 顺序：父 effect 重跑或停止前，要先从 `depsTail` 反向释放
+子 effect / scope，再执行父 effect 自己的 cleanup。这样嵌套 effect 的清理顺序
+保持为“最内层先、后创建的 sibling 先”。
+
 ### 阅读词汇表：把 flags 翻译成问题
 
 读 `engine.lua` 时，不要先把 flags 当成二进制位看；可以先把它们翻译成

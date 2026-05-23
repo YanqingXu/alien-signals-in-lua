@@ -56,6 +56,8 @@ refactored/
 - `connectDependencyToSubscriber` —— 建立依赖关系，并尽量复用上一轮的旧 Link。
 - `removeDependencyLink` —— 同步从两条链上摘除一个 Link，并在依赖源失去所有
   订阅者时回调 `onDependencyBecameUnwatched`。
+- `removeDependencyLinksInReverse` —— 从 `depsTail` 反向摘除依赖，用于按 LIFO
+  顺序清理嵌套 effect / scope。
 - `removeStaleDependencyLinks` —— 跑完一次 effect/computed 后清理 `depsTail`
   之后残留的旧依赖。
 - `linkIsInsideCurrentDependencyPrefix` —— 判断某个 Link 是否落在本轮已经
@@ -111,7 +113,7 @@ refactored/
 - `isSignal` / `isComputed` / `isEffect` / `isEffectScope` —— 通过
   `constants.functionToNode` 反查 callable 背后的节点类型。
 
-启动末尾注册 `stopEffectScopeNode` 为 `engine.setStopInactiveNodeHandler`，
+启动末尾注册 `stopInactiveNode` 为 `engine.setStopInactiveNodeHandler`，
 让 `engine` 在节点失去全部订阅者时能够安全停止用户作用域。
 
 ## 模块依赖关系
@@ -134,7 +136,7 @@ init.lua
 - `graph` / `scheduler` 只依赖 `constants`。
 - `engine` 依赖 `constants` / `graph` / `scheduler`，并向后两者注入回调
   (`runEffectHandler`、`unwatched handler`) 形成协作环。
-- `primitives` 依赖前面四者，并向 `engine` 注入 `stopEffectScopeNode`。
+- `primitives` 依赖前面四者，并向 `engine` 注入 `stopInactiveNode`。
 - `init` 只依赖 `primitives`、`scheduler`、`engine`、`constants`，
   仅做 API 聚合。
 

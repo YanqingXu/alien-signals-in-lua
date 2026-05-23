@@ -163,8 +163,9 @@ flowchart TD
 
 - `commitSignalValue` —— 把 `pendingValue` 落到 `currentValue`，返回是否
   变化。值相等时不触发下游。
-- `updateComputedValue` —— 用 `beginFreshTracking` 包裹 getter 调用，
-  失败时给节点打上 `Dirty` 以便下次仍尝试重跑，再 `error` 上抛。
+- `updateComputedValue` —— 如果 computed 拥有子 effect，先按逆序释放旧子树；
+  再用 `beginFreshTracking` 包裹 getter 调用，失败时给节点打上 `Dirty`
+  以便下次仍尝试重跑，再 `error` 上抛。
 - `runComputedForTheFirstTime` —— 首次激活 lazy computed；和 update 的差别在
   不推进 `trackingVersion`（首次还没有"上一轮"可比较）。
 - `runEffectBody` / `runCleanup` / `runScheduledEffect` —— effect 的完整
@@ -175,7 +176,7 @@ flowchart TD
 由 `graph` 在依赖源 `subs` 变为空时回调：
 
 - 非 Mutable 节点（effect / scope）：调用 `stopInactiveNode(node)` 真正停掉。
-- Mutable 节点（computed）：保留对象但清掉自己的 `depsTail` 与上游依赖，
+- Mutable 节点（computed）：保留对象但按逆序清掉自己的上游依赖与子 effect，
   转回 "lazy + dirty" 状态，等待下次被读取时再激活。
 
 ## 模块协作 (注入点)
@@ -188,7 +189,7 @@ graph.setUnwatchedHandler(engine.handleNodeWithoutSubscribers)
 ```
 
 把 `engine` 的回调函数注入到 `scheduler` 与 `graph`。`primitives` 启动末尾
-再把 `stopEffectScopeNode` 注入到 `engine.setStopInactiveNodeHandler`，
+再把 `stopInactiveNode` 注入到 `engine.setStopInactiveNodeHandler`，
 形成完整的协作环。这种"模块自带默认 no-op + 由更高层注入真实实现"
 的模式让每个模块都可以被单独 require、单独测试。
 
@@ -198,7 +199,7 @@ graph.setUnwatchedHandler(engine.handleNodeWithoutSubscribers)
 - **被依赖**：`primitives`、`init`。
 - **反向注入**：`engine.runScheduledEffect → scheduler`、
   `engine.handleNodeWithoutSubscribers → graph`、
-  `primitives.stopEffectScopeNode → engine`。
+  `primitives.stopInactiveNode → engine`。
 
 ## 关键细节回顾
 

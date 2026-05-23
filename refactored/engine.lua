@@ -12,6 +12,7 @@ local graph = require("refactored.graph")
 local scheduler = require("refactored.scheduler")
 
 local ReactiveFlags = constants.ReactiveFlags
+local HAS_CHILD_EFFECT = constants.HAS_CHILD_EFFECT
 
 local engine = {}
 
@@ -205,8 +206,24 @@ function engine.commitSignalValue(signalNode)
     return true
 end
 
+local function isSignalOrComputedNode(node)
+    return node.__type == constants.SIGNAL_MARKER
+        or node.__type == constants.COMPUTED_MARKER
+        or node.getter ~= nil
+end
+
+local function disposeChildDependencyLinks(subscriber)
+    graph.removeDependencyLinksInReverse(subscriber, function(dependency)
+        return not isSignalOrComputedNode(dependency)
+    end)
+end
+
 function engine.updateComputedValue(computedNode, shouldPassOldValue)
     local oldValue = computedNode.value
+
+    if constants.hasFlag(computedNode, HAS_CHILD_EFFECT) then
+        disposeChildDependencyLinks(computedNode)
+    end
 
     engine.beginFreshTracking(computedNode, ReactiveFlags.Mutable, true)
 
@@ -394,12 +411,20 @@ end
 
 function engine.runScheduledEffect(effectNode)
     effectNode.isQueued = false
+    local flagsBeforeRun = effectNode.flags or ReactiveFlags.None
 
     if not engine.effectNeedsToRun(effectNode) then
         if not constants.isInactive(effectNode) then
-            constants.setFlags(effectNode, ReactiveFlags.Watching)
+            constants.setFlags(
+                effectNode,
+                bit.bor(ReactiveFlags.Watching, bit.band(flagsBeforeRun, HAS_CHILD_EFFECT))
+            )
         end
         return
+    end
+
+    if constants.hasFlag(effectNode, HAS_CHILD_EFFECT) then
+        disposeChildDependencyLinks(effectNode)
     end
 
     if effectNode.cleanup then
@@ -419,9 +444,8 @@ function engine.handleNodeWithoutSubscribers(node)
     end
 
     if node.depsTail then
-        node.depsTail = nil
         constants.setFlags(node, bit.bor(ReactiveFlags.Mutable, ReactiveFlags.Dirty))
-        graph.removeStaleDependencyLinks(node)
+        graph.removeDependencyLinksInReverse(node)
     end
 end
 

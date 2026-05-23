@@ -184,6 +184,18 @@ flowchart TD
 
 然后调用 `removeDependencyLink` 顺序拆除。
 
+### `removeDependencyLinksInReverse(sub, shouldRemoveDependency?)`
+
+从 `sub.depsTail` 沿 `prevDep` 反向拆除依赖。它主要服务 cleanup：
+
+- effect/scope 停止时，按创建逆序释放子 effect。
+- computed 失去观察者时，反向释放 getter 内创建的子 effect。
+- 父 effect 重跑前，只释放子 effect/scope，保留 signal/computed 依赖给
+  下一轮追踪复用。
+
+可选的 `shouldRemoveDependency(dep, link)` 谓词用于过滤要拆的依赖；不传时表示
+整条 `deps` 链都拆掉。
+
 ### `linkIsInsideCurrentDependencyPrefix(link, sub)`
 
 从 `sub.depsTail` 沿 `prevDep` 向前找，看 `link` 是不是落在"已经被本轮重新

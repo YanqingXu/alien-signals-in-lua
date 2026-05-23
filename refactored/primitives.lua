@@ -13,10 +13,12 @@ local scheduler = require("refactored.scheduler")
 local engine = require("refactored.engine")
 
 local ReactiveFlags = constants.ReactiveFlags
+local HAS_CHILD_EFFECT = constants.HAS_CHILD_EFFECT
 
 local primitives = {}
 
 local stopEffectScopeNode
+local stopInactiveNode
 
 local function signalOperation(signalNode, ...)
     if select("#", ...) > 0 then
@@ -89,10 +91,11 @@ function primitives.computed(getter)
 end
 
 local function stopEffectNode(effectNode)
+    stopEffectScopeNode(effectNode)
     if effectNode.cleanup then
         engine.runCleanup(effectNode)
     end
-    stopEffectScopeNode(effectNode)
+    constants.setFlags(effectNode, ReactiveFlags.None)
 end
 
 function primitives.effect(fn)
@@ -110,6 +113,7 @@ function primitives.effect(fn)
     local parentSubscriber = engine.getActiveSub()
     if parentSubscriber then
         graph.connectDependencyToSubscriber(effectNode, parentSubscriber, 0)
+        constants.addFlags(parentSubscriber, HAS_CHILD_EFFECT)
     end
 
     local ok, cleanupOrError = engine.callWithSubscriber(effectNode, fn)
@@ -128,13 +132,21 @@ end
 
 stopEffectScopeNode = function(scopeNode)
     scopeNode.isQueued = false
-    scopeNode.depsTail = nil
     constants.setFlags(scopeNode, ReactiveFlags.None)
-    graph.removeStaleDependencyLinks(scopeNode)
+    graph.removeDependencyLinksInReverse(scopeNode)
 
     while scopeNode.subs do
         graph.removeDependencyLink(scopeNode.subs)
     end
+end
+
+stopInactiveNode = function(node)
+    if node.__type == constants.EFFECT_MARKER or node.fn then
+        stopEffectNode(node)
+        return
+    end
+
+    stopEffectScopeNode(node)
 end
 
 function primitives.effectScope(fn)
@@ -150,6 +162,7 @@ function primitives.effectScope(fn)
     local parentSubscriber = engine.setActiveSub(scopeNode)
     if parentSubscriber then
         graph.connectDependencyToSubscriber(scopeNode, parentSubscriber, 0)
+        constants.addFlags(parentSubscriber, HAS_CHILD_EFFECT)
     end
 
     local ok, err = pcall(fn)
@@ -222,6 +235,6 @@ function primitives.isEffectScope(value)
     return node ~= nil and node.__type == constants.EFFECT_SCOPE_MARKER
 end
 
-engine.setStopInactiveNodeHandler(stopEffectScopeNode)
+engine.setStopInactiveNodeHandler(stopInactiveNode)
 
 return primitives

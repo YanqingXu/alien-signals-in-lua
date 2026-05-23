@@ -51,6 +51,7 @@ activeSubscriber 的依赖。
   `graph.connectDependencyToSubscriber(effectNode, parent, 0)` 把当前 effect
   作为 dependency 挂到父 subscriber 上——这条边是父子关系的物理体现，
   也是 `scheduler.enqueueEffect` 沿 `subs` 链上收集嵌套 effect 的依据。
+  同时给父节点加上 `HAS_CHILD_EFFECT`，让父节点重跑或停止时先释放旧子树。
 - 用 `callWithSubscriber` 在 `pcall` 里执行 `fn`：返回值若是函数，作为下次
   重跑前/停止时的 cleanup 保存到 `effectNode.cleanup`。
 - 失败时调用 `stopEffectScopeNode` 把节点彻底拆除并上抛错误。
@@ -66,7 +67,7 @@ scope 是"批量管理子 effect 的容器"，自己不重跑：
 - 返回的 stop callable 会清空 scope 自己的依赖与所有子订阅者
   （子 effect 在被 `graph.removeDependencyLink` 摘除后，因 subs 变空触发
   `engine.handleNodeWithoutSubscribers` → `stopInactiveNode` →
-  `stopEffectScopeNode` 链式停止）。
+  `stopEffectNode` 链式停止并运行 cleanup）。
 
 ### `trigger(fn)` — 手动失效
 
@@ -86,14 +87,12 @@ scope 是"批量管理子 effect 的容器"，自己不重跑：
 
 ## 内部辅助：`stopEffectScopeNode`
 
-被 `engine.setStopInactiveNodeHandler` 注入，承担"安全停掉一个 effect 或
-scope"的统一逻辑：
+承担"安全停掉一个 effect 或 scope"时的共同部分：
 
 ```lua
 scopeNode.isQueued = false
-scopeNode.depsTail = nil
 setFlags(scopeNode, ReactiveFlags.None)   -- 标记为 inactive
-removeStaleDependencyLinks(scopeNode)     -- 摘掉自己的所有上游
+removeDependencyLinksInReverse(scopeNode) -- 逆序摘掉上游；子 effect 会先 cleanup
 while scopeNode.subs do                   -- 摘掉自己的所有下游
     removeDependencyLink(scopeNode.subs)
 end
@@ -102,12 +101,16 @@ end
 注意第二个循环依赖 `removeDependencyLink` 摘掉 `link` 后会让
 `scopeNode.subs` 自动指向 `nextSub`，所以无需手动推进。
 
-`stopEffectNode` 在此基础上多跑一次 cleanup：
+`stopEffectNode` 在此基础上多跑一次 cleanup。注意顺序是先停子树，再跑父 effect
+自己的 cleanup：
 
 ```lua
-if effectNode.cleanup then runCleanup(effectNode) end
 stopEffectScopeNode(effectNode)
+if effectNode.cleanup then runCleanup(effectNode) end
 ```
+
+`stopInactiveNode` 是注入给 engine 的分发入口：effect 走 `stopEffectNode`，
+scope 走 `stopEffectScopeNode`。
 
 ## 端到端链路：从 `signal(v)` 写入到 `effect` 重跑
 
@@ -162,7 +165,7 @@ sequenceDiagram
 
 - **依赖**：`bit`、`constants`、`graph`、`scheduler`、`engine`。
 - **被依赖**：`init`。
-- **反向注入**：`stopEffectScopeNode → engine.setStopInactiveNodeHandler`。
+- **反向注入**：`stopInactiveNode → engine.setStopInactiveNodeHandler`。
 
 ## 关键细节回顾
 
