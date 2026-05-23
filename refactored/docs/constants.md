@@ -86,6 +86,8 @@ callable 之后，对应条目可以被 GC 回收。
 | `Dirty` vs `Pending` | `Dirty` 是“我自己要检查”，`Pending` 是“我得先问上游有没有真的变” |
 | `Mutable` vs `Watching` | `Mutable` 节点负责产出值并继续传播，`Watching` 节点负责被调度重跑 |
 
+按节点类型理解 flags 如何迁移，见 [`state-machine.md`](state-machine.md)。
+
 ### 预组合常量
 
 ```lua

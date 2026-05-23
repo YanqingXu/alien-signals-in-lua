@@ -78,6 +78,8 @@ PUSH 阶段只做最便宜的"打标"和"入队"，**不调用任何 getter**；
 需要值的时候才沿 `deps` 链回溯确认。这种分离让 "先写新值再写回旧值"
 之类的瞬时波动不会触发任何下游重算。
 
+各类节点在 PUSH/PULL 中的 flags 变化，见 [`state-machine.md`](state-machine.md)。
+
 #### 单步决策：`decidePropagationForSubscriber(sub, link, isWriteInsideRun)`
 
 按以下顺序判断，命中即返回：

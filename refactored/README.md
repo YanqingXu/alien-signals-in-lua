@@ -148,6 +148,7 @@ init.lua
 - [`docs/graph.md`](docs/graph.md)
 - [`docs/scheduler.md`](docs/scheduler.md)
 - [`docs/engine.md`](docs/engine.md)
+- [`docs/state-machine.md`](docs/state-machine.md)
 - [`docs/primitives.md`](docs/primitives.md)
 - [`docs/effect-cleanup.md`](docs/effect-cleanup.md)
 - [`docs/from-naive-map-to-link.md`](docs/from-naive-map-to-link.md)
