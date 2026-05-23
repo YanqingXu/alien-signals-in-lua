@@ -112,6 +112,8 @@ if effectNode.cleanup then runCleanup(effectNode) end
 `stopInactiveNode` 是注入给 engine 的分发入口：effect 走 `stopEffectNode`，
 scope 走 `stopEffectScopeNode`。
 
+嵌套 effect 的完整重跑/停止顺序见 [`effect-cleanup.md`](effect-cleanup.md)。
+
 ## 端到端链路：从 `signal(v)` 写入到 `effect` 重跑
 
 以一个最常见的链路为例：用户有 `count = signal(0)`、`double = computed(() => count() * 2)`、

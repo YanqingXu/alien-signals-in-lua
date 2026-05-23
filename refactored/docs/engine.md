@@ -179,6 +179,21 @@ flowchart TD
 - Mutable 节点（computed）：保留对象但按逆序清掉自己的上游依赖与子 effect，
   转回 "lazy + dirty" 状态，等待下次被读取时再激活。
 
+### 6. 嵌套 effect cleanup
+
+父 effect / computed 可能在自己的执行过程中创建子 effect。创建子节点时，
+`primitives` 会给父节点加上 `HAS_CHILD_EFFECT`；`engine.runScheduledEffect`
+在父 effect 重跑前看到这个标记，就会先调用子树清理逻辑，再执行父 effect 自己的
+`runCleanup`。
+
+这保证了 cleanup 顺序符合栈语义：
+
+```text
+old child cleanup -> parent cleanup -> parent body -> new child setup
+```
+
+完整生命周期见 [`effect-cleanup.md`](effect-cleanup.md)。
+
 ## 模块协作 (注入点)
 
 启动末尾两行：
