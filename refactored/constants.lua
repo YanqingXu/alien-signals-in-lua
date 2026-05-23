@@ -22,7 +22,7 @@ ReactiveFlags 词汇表
 这些名字尽量贴近原实现，但阅读时可以把它们理解成下面的问题：
 
 - None          节点已经停止，或尚未进入响应式图。
-- Mutable       这个节点会产出值，且可以作为依赖源被下游订阅。
+- Mutable       这个节点可作为依赖源被下游订阅，并参与传播。
 - Watching      这个节点是活跃 effect，失效传播时需要被调度。
 - RecursedCheck 节点正在重建自己的依赖链，传播时要处理自递归场景。
 - Recursed      失效传播已经在递归路径中再次触达过这个节点。
@@ -58,6 +58,7 @@ constants.PROPAGATION_GUARD_FLAGS = bit.bor(
     ReactiveFlags.Pending
 )
 
+-- 把内部 node 绑定成用户可调用的闭包。
 function constants.bind(operation, node)
     local callable = function(...)
         return operation(node, ...)
@@ -66,6 +67,7 @@ function constants.bind(operation, node)
     return callable
 end
 
+-- 从用户闭包反查它代表的内部 node。
 function constants.nodeForCallable(value)
     if type(value) ~= "function" then
         return nil
@@ -73,55 +75,92 @@ function constants.nodeForCallable(value)
     return constants.functionToNode[value]
 end
 
-function constants.hasFlagValue(flags, flag)
+-- 判断 node 是否是 signal。
+function constants.isSignalNode(node)
+    return type(node) == "table" and node.__type == constants.SIGNAL_MARKER
+end
+
+-- 判断 node 是否是 computed。
+function constants.isComputedNode(node)
+    return type(node) == "table" and node.__type == constants.COMPUTED_MARKER
+end
+
+-- 判断 node 是否是 effect。
+function constants.isEffectNode(node)
+    return type(node) == "table" and node.__type == constants.EFFECT_MARKER
+end
+
+-- 判断 node 是否是 effect scope。
+function constants.isEffectScopeNode(node)
+    return type(node) == "table" and node.__type == constants.EFFECT_SCOPE_MARKER
+end
+
+-- 判断 node 是否会产出可被订阅的值。
+function constants.isValueProducerNode(node)
+    return constants.isSignalNode(node) or constants.isComputedNode(node)
+end
+
+-- 判断 flags 整数是否包含某一位。
+function constants.hasBit(flags, flag)
     return bit.band(flags or 0, flag) ~= 0
 end
 
-function constants.hasAllFlagValues(flags, flagSet)
+-- 判断 flags 整数是否包含一组位。
+function constants.hasAllBits(flags, flagSet)
     return bit.band(flags or 0, flagSet) == flagSet
 end
 
-function constants.hasAnyFlagValue(flags, flagSet)
+-- 判断 flags 整数是否包含任意一位。
+function constants.hasAnyBits(flags, flagSet)
     return bit.band(flags or 0, flagSet) ~= 0
 end
 
+-- 判断 node.flags 是否包含某一位。
 function constants.hasFlag(node, flag)
-    return constants.hasFlagValue(node.flags, flag)
+    return constants.hasBit(node.flags, flag)
 end
 
+-- 直接覆盖 node.flags。
 function constants.setFlags(node, flags)
     node.flags = flags
 end
 
+-- 给 node.flags 增加一组位。
 function constants.addFlags(node, flags)
     node.flags = bit.bor(node.flags or ReactiveFlags.None, flags)
 end
 
+-- 从 node.flags 移除一组位。
 function constants.removeFlags(node, flags)
     node.flags = bit.band(node.flags or ReactiveFlags.None, bit.bnot(flags))
 end
 
+-- 判断节点是否会参与下游传播。
 function constants.isMutableNode(node)
     return constants.hasFlag(node, ReactiveFlags.Mutable)
 end
 
+-- 判断 effect 是否仍处于监听态。
 function constants.isWatchingEffect(node)
     return constants.hasFlag(node, ReactiveFlags.Watching)
 end
 
+-- 判断节点是否已经停用或尚未激活。
 function constants.isInactive(node)
     return (node.flags or ReactiveFlags.None) == ReactiveFlags.None
 end
 
-function constants.isMutableAndDirty(node)
-    return constants.hasAllFlagValues(
+-- 判断值节点是否已确定变脏。
+function constants.isDirtyValue(node)
+    return constants.hasAllBits(
         node.flags,
         bit.bor(ReactiveFlags.Mutable, ReactiveFlags.Dirty)
     )
 end
 
-function constants.isMutableAndPending(node)
-    return constants.hasAllFlagValues(
+-- 判断值节点是否等待上游确认。
+function constants.isPendingValue(node)
+    return constants.hasAllBits(
         node.flags,
         bit.bor(ReactiveFlags.Mutable, ReactiveFlags.Pending)
     )

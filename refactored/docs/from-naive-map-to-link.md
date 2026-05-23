@@ -116,7 +116,7 @@ subscriber.deps 链： prevDep <-> nextDep
 dependency.subs 链： prevSub <-> nextSub
 ```
 
-不需要在线性数组里搜索，不需要再从另一张表里反查。`graph.removeDependencyLink`
+不需要在线性数组里搜索，不需要再从另一张表里反查。`graph.unlink`
 正是把这四根指针同步接回去。
 
 ## 为什么保留读取顺序
@@ -132,7 +132,7 @@ dependency.subs 链： prevSub <-> nextSub
 本一轮：A -> B -> C
 ```
 
-`connectDependencyToSubscriber` 可以直接复用旧 Link，只刷新 `version` 并推进
+`connect` 可以直接复用旧 Link，只刷新 `version` 并推进
 游标，几乎没有分配。
 
 如果本轮少读了 `C`：
@@ -143,7 +143,7 @@ dependency.subs 链： prevSub <-> nextSub
 ```
 
 重跑结束后，`depsTail` 停在 `B`，`depsTail.nextDep` 开始的部分就是陈旧依赖。
-这就是 `removeStaleDependencyLinks` 的起点。
+这就是 `unlinkStaleDeps` 的起点。
 
 ## 和 HashMap 方案的取舍
 
@@ -174,10 +174,10 @@ HashMap/Set 方案更直观，适合教学版的第一步；双链 Link 更适�
 | 想知道什么 | 看哪里 |
 | --- | --- |
 | 一条边长什么样 | `createLink` |
-| 读到依赖时如何连边 | `connectDependencyToSubscriber` |
-| 两条链如何同时摘除 | `removeDependencyLink` |
-| 本轮没读到的旧依赖如何清理 | `removeStaleDependencyLinks` |
-| 递归追踪时如何判断 link 是否已覆盖 | `linkIsInsideCurrentDependencyPrefix` |
+| 读到依赖时如何连边 | `connect` |
+| 两条链如何同时摘除 | `unlink` |
+| 本轮没读到的旧依赖如何清理 | `unlinkStaleDeps` |
+| 递归追踪时如何判断 link 是否已覆盖 | `isLinkInCurrentDeps` |
 
 掌握这张图之后，再看 `engine` 的 PUSH/PULL 算法会轻松很多：`engine` 只是决定
 什么时候沿 `subs` 走、什么时候沿 `deps` 走；真正保证图结构正确的是 `Link`。

@@ -44,7 +44,7 @@ computed 是 lazy 的：创建时不立刻执行 getter。
 | 阶段 | flags | 触发入口 | 含义 |
 | --- | --- | --- | --- |
 | 尚未激活 | `None` | `computed(getter)` | 没有值，也没有上游依赖 |
-| 首次读取中 | `Mutable | RecursedCheck` | `runComputedForTheFirstTime` | 正在执行 getter 并收集依赖 |
+| 首次读取中 | `Mutable | RecursedCheck` | `initComputed` | 正在执行 getter 并收集依赖 |
 | 已激活/干净 | `Mutable` | 首次读取完成或刷新完成 | 有缓存值，可作为依赖源 |
 | 上游可能变了 | `Mutable | Pending` | PUSH 阶段传播 | 下次被读取时再确认 |
 | 确认需要重算 | `Mutable | Dirty` 或含 `Dirty` | 上游确认变化、失去观察者、错误后重试 | 下次读取必须刷新自己 |
@@ -69,7 +69,7 @@ Mutable
 
 ```text
 Mutable | Pending
-  -- checkDependencyChainForChanges returns false -->
+  -- checkDeps returns false -->
 Mutable
 ```
 
@@ -85,7 +85,7 @@ effect 不产出值，它负责被调度重跑。因此它的核心状态是 `Wa
 | 首次运行中 | `Watching | RecursedCheck` | `effect(fn)` | 正在执行 fn 并收集依赖 |
 | 监听中 | `Watching` | 首次运行完成或重跑完成 | 上游变化时需要入队 |
 | 已入队 | `Pending`, `isQueued = true` | `scheduler.enqueueEffect` | 已经在队列里，临时移除 `Watching` 去重 |
-| 需要重跑 | `Dirty` 或 pull 确认变化 | `runScheduledEffect` | 先 cleanup，再执行 effect body |
+| 需要重跑 | `Dirty` 或 pull 确认变化 | `runQueuedEffect` | 先 cleanup，再执行 effect body |
 | 已停止 | `None` | stop callable / 失去父订阅者 | 不再参与传播 |
 
 简化流程：
@@ -95,7 +95,7 @@ Watching
   -- upstream write -->
 Pending + isQueued
   -- scheduler.flush -->
-runScheduledEffect
+runQueuedEffect
   -- effect body finished -->
 Watching
 ```
@@ -144,7 +144,7 @@ effect  : Pending + isQueued
 等 scheduler 刷新 effect 时，进入 PULL 阶段：
 
 ```text
-effectNeedsToRun(effect)
+shouldRunEffect(effect)
   -> check double
      -> check count
         -> commit count: Dirty -> Mutable, value changed
@@ -171,11 +171,11 @@ RecursedCheck = “我正在收集依赖，别把我当成普通干净节点处�
 Recursed      = “传播路径已经绕回执行中的节点，需要延后处理”
 ```
 
-看到这两个 flag 时，建议直接跳到 `decidePropagationForSubscriber`：
+看到这两个 flag 时，建议直接跳到 `decidePropagation`：
 
 1. 如果节点没有递归标记，重复传播通常会被跳过。
 2. 如果节点正在 `RecursedCheck` 中，算法会用
-   `linkIsInsideCurrentDependencyPrefix` 判断当前 link 是否已经被本轮重新覆盖。
+   `isLinkInCurrentDeps` 判断当前 link 是否已经被本轮重新覆盖。
 3. 只有满足条件时，才补上 `Recursed | Pending`，避免错误重入。
 
 ## 组合速查
@@ -196,14 +196,14 @@ Recursed      = “传播路径已经绕回执行中的节点，需要延后处�
 
 | 想看哪种迁移 | 入口 |
 | --- | --- |
-| signal 写入变 Dirty | `primitives.signalOperation` |
+| signal 写入变 Dirty | `primitives.signalOp` |
 | signal Dirty 回到 Mutable | `engine.commitSignalValue` |
-| computed 首次激活 | `engine.runComputedForTheFirstTime` |
+| computed 首次激活 | `engine.initComputed` |
 | computed Pending 是否刷新 | `engine.computedNeedsRefresh` |
-| Pending 递归确认 | `engine.checkDependencyChainForChanges` |
+| Pending 递归确认 | `engine.checkDeps` |
 | effect 入队去重 | `scheduler.enqueueEffect` |
-| effect 重跑恢复 Watching | `engine.runScheduledEffect` |
-| 递归传播判定 | `engine.decidePropagationForSubscriber` |
+| effect 重跑恢复 Watching | `engine.runQueuedEffect` |
+| 递归传播判定 | `engine.lua` 中的 `decidePropagation` |
 | 子 effect cleanup 标记 | `constants.HAS_CHILD_EFFECT` 和 `effect-cleanup.md` |
 
 把这张表和 `graph.md` 的 Link 结构放在一起看，基本就能读懂整个实现：

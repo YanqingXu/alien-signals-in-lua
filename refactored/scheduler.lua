@@ -20,10 +20,12 @@ local runEffectHandler = function()
     error("scheduler.runEffectHandler has not been configured")
 end
 
+-- 注入真正执行 effect 的函数。
 function scheduler.setRunEffectHandler(handler)
     runEffectHandler = handler
 end
 
+-- 暴露当前 batch 嵌套深度。
 function scheduler.getBatchDepth()
     return batchDepth
 end
@@ -53,6 +55,7 @@ function scheduler.enqueueEffect(effectNode)
     end
 end
 
+-- 消费队列，并在出错时恢复剩余 effect。
 function scheduler.flush()
     local ok, err = pcall(function()
         while queueReadIndex < queuedEffectCount do
@@ -86,10 +89,12 @@ function scheduler.flush()
     end
 end
 
+-- 进入一层 batch。
 function scheduler.startBatch()
     batchDepth = batchDepth + 1
 end
 
+-- 退出一层 batch，最外层结束时 flush。
 function scheduler.endBatch()
     batchDepth = batchDepth - 1
     if batchDepth == 0 then

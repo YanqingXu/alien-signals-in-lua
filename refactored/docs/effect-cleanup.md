@@ -57,7 +57,7 @@ child.subs 链：保存谁把 child 当成 dependency
 ```
 
 这样父 effect 停止时，可以沿自己的 `deps` 链找到子 effect；子 effect 失去所有
-订阅者时，也能触发 `engine.handleNodeWithoutSubscribers`，进入统一的停止流程。
+订阅者时，也能触发 `engine.handleUnwatched`，进入统一的停止流程。
 
 ## `HAS_CHILD_EFFECT` 的作用
 
@@ -73,7 +73,7 @@ constants.HAS_CHILD_EFFECT
 
 > 这个节点的 `deps` 链里可能有需要 cleanup 的子 effect / scope 吗？
 
-如果答案是 yes，`engine.runScheduledEffect` 在执行父 cleanup 之前，会先释放旧子树。
+如果答案是 yes，`engine.runQueuedEffect` 在执行父 cleanup 之前，会先释放旧子树。
 
 ## 外层 effect 重跑的顺序
 
@@ -90,14 +90,14 @@ sequenceDiagram
     participant In as old inner effect
     participant Fn as user functions
 
-    S->>Eng: propagateInvalidationFrom(a.subs)
+    S->>Eng: propagate(a.subs)
     Eng->>Sch: enqueueEffect(outer)
-    Sch->>Eng: runScheduledEffect(outer)
-    Eng->>Eng: effectNeedsToRun(outer) == true
+    Sch->>Eng: runQueuedEffect(outer)
+    Eng->>Eng: shouldRunEffect(outer) == true
     Eng->>Eng: outer has HAS_CHILD_EFFECT?
-    Eng->>Gr: removeDependencyLinksInReverse(outer, child-only)
+    Eng->>Gr: unlinkDepsReverse(outer, child-only)
     Gr->>Eng: old inner has no subscribers
-    Eng->>In: stopInactiveNode(old inner)
+    Eng->>In: stopNode(old inner)
     In->>Fn: inner cleanup
     Eng->>Fn: outer cleanup
     Eng->>Fn: run outer body
@@ -107,11 +107,11 @@ sequenceDiagram
 
 核心顺序是：
 
-1. `runScheduledEffect(outer)` 确认外层真的需要重跑。
-2. 如果外层带 `HAS_CHILD_EFFECT`，先调用 `disposeChildDependencyLinks(outer)`。
-3. `disposeChildDependencyLinks` 只删除 effect/scope 类型的依赖，保留 signal 和
+1. `runQueuedEffect(outer)` 确认外层真的需要重跑。
+2. 如果外层带 `HAS_CHILD_EFFECT`，先调用 `unlinkChildDeps(outer)`。
+3. `unlinkChildDeps` 只删除 effect/scope 类型的依赖，保留 signal 和
    computed 依赖给正常追踪逻辑处理。
-4. 子 effect 被摘掉后，因为 `subs` 变空，会进入 `stopInactiveNode`。
+4. 子 effect 被摘掉后，因为 `subs` 变空，会进入 `stopNode`。
 5. 子 effect cleanup 完成后，才执行外层自己的 `runCleanup(outer)`。
 6. 最后执行外层 body，重新创建新的子 effect。
 
@@ -136,7 +136,7 @@ cleanup1
 ```
 
 父节点的 `deps` 链按读取/创建顺序排列，因此从 `depsTail` 沿 `prevDep` 反向走，
-天然就是 LIFO 顺序。这就是 `graph.removeDependencyLinksInReverse` 存在的原因。
+天然就是 LIFO 顺序。这就是 `graph.unlinkDepsReverse` 存在的原因。
 
 ## 停止 effect 与重跑 effect 的差别
 
@@ -162,9 +162,9 @@ cleanup1
 
 1. `primitives.effect`：子 effect 如何连到当前 active parent。
 2. `constants.HAS_CHILD_EFFECT`：父节点如何记住自己拥有子树。
-3. `engine.runScheduledEffect`：父 effect 重跑前如何先释放子树。
-4. `graph.removeDependencyLinksInReverse`：为什么 cleanup 是 LIFO。
-5. `primitives.stopEffectNode`：用户手动 stop 时如何复用同样顺序。
+3. `engine.runQueuedEffect`：父 effect 重跑前如何先释放子树。
+4. `graph.unlinkDepsReverse`：为什么 cleanup 是 LIFO。
+5. `primitives.stopEffect`：用户手动 stop 时如何复用同样顺序。
 
 掌握这个生命周期之后，`tests/test_effect_cleanup.lua` 里的几组顺序断言就会变得
 很直观：它们不是边界怪例，而是在保护这套“子树先释放”的语义。

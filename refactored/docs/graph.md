@@ -129,7 +129,7 @@ Signal B  subs ──►│   Link(B→E)     │──► nil    (Effect F 没�
 
 朴素的构造函数。`version = 0` 是初始值，调用方随后会写入当前 `trackingVersion`。
 
-### `connectDependencyToSubscriber(dep, sub, version)` — 增量复用算法
+### `connect(dep, sub, version)` — 增量复用算法
 
 这是 graph 模块里最微妙的函数。核心思想：**effect 重跑时，依赖的读取顺序
 往往与上一轮一致；如果一致，就原地复用上一轮的 Link，不分配新对象**。
@@ -161,7 +161,7 @@ flowchart TD
 绿色分支是高频热路径（effect 重跑时依赖顺序不变），红色分支才会真正分配
 新 Link。
 
-### `removeDependencyLink(link, explicitSubscriber?)`
+### `unlink(link, explicitSubscriber?)`
 
 双向链表方案最需要谨慎的地方：**只拆一边会留下悬挂引用**，下一轮传播或清理
 就会跑到一个已经无效的订阅者上。函数严格执行四步：
@@ -170,21 +170,21 @@ flowchart TD
 2. 在 `dependency.subs` 链上接通 `link.prevSub ↔ link.nextSub`。
 3. 清空 `link` 自身的四个指针，方便 GC。
 4. 如果 `dependency.subs == nil`，回调 `onDependencyBecameUnwatched(dep)`，
-   通知上层算法（`engine.handleNodeWithoutSubscribers`）该依赖源已无观察者，
+   通知上层算法（`engine.handleUnwatched`）该依赖源已无观察者，
    可以停掉它自己的依赖。
 
-返回 `nextDependencyLink`，方便 `removeStaleDependencyLinks` 顺链清理。
+返回 `nextDependencyLink`，方便 `unlinkStaleDeps` 顺链清理。
 
-### `removeStaleDependencyLinks(sub)`
+### `unlinkStaleDeps(sub)`
 
 按规则起点：
 
 - 如果本轮读到过依赖，则从 `depsTail.nextDep` 开始；
 - 如果本轮一个依赖都没读，则从 `sub.deps` 开始（整条链都过时了）。
 
-然后调用 `removeDependencyLink` 顺序拆除。
+然后调用 `unlink` 顺序拆除。
 
-### `removeDependencyLinksInReverse(sub, shouldRemoveDependency?)`
+### `unlinkDepsReverse(sub, shouldRemoveDependency?)`
 
 从 `sub.depsTail` 沿 `prevDep` 反向拆除依赖。它主要服务 cleanup：
 
@@ -196,7 +196,18 @@ flowchart TD
 可选的 `shouldRemoveDependency(dep, link)` 谓词用于过滤要拆的依赖；不传时表示
 整条 `deps` 链都拆掉。
 
-### `linkIsInsideCurrentDependencyPrefix(link, sub)`
+### `validateDeps(sub)` / `validateSubs(dep)`
+
+debug/测试专用的不变量检查。它们不会修改图结构，只验证：
+
+- `prevDep` / `nextDep` 或 `prevSub` / `nextSub` 是否互相接得上。
+- 链表尾指针 `depsTail` / `subsTail` 是否指向最后一个 Link。
+- 每个 Link 是否同时出现在 `sub.deps` 与 `dep.subs` 两条链中。
+
+返回 `(true)` 表示通过；失败时返回 `(false, message)`。生产热路径不调用它们，
+模块级测试用它们锁住双链 Link 的结构约束。
+
+### `isLinkInCurrentDeps(link, sub)`
 
 从 `sub.depsTail` 沿 `prevDep` 向前找，看 `link` 是不是落在"已经被本轮重新
 追踪过的前缀"里。`engine` 在判断"是否要把一个正在追踪中的 subscriber 标记
@@ -213,7 +224,7 @@ flowchart TD
 
 - **依赖**：无（甚至不依赖 `constants`，因为 graph 只摆指针、不读 flags）。
 - **被依赖**：`engine`、`primitives`。`scheduler` 不直接使用 graph。
-- **反向回调**：`engine.handleNodeWithoutSubscribers` 通过
+- **反向回调**：`engine.handleUnwatched` 通过
   `graph.setUnwatchedHandler` 注入。
 
 ## 关键细节回顾
@@ -223,4 +234,4 @@ flowchart TD
 - **`subsTail` 与 `depsTail` 不对称**：`subsTail` 始终指向最后一个订阅者
   （仅追加场景），`depsTail` 在 effect 重跑时被当作游标使用，含义不同。
 - **不抛错原则**：graph 的所有函数都不抛错，所有失败情形都通过返回 nil
-  或保留旧状态表达，便于在 `engine.callWithSubscriber` 的 pcall 里安全调用。
+  或保留旧状态表达，便于在 `engine.callWithSub` 的 pcall 里安全调用。

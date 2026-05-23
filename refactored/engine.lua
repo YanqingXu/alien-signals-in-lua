@@ -16,30 +16,61 @@ local HAS_CHILD_EFFECT = constants.HAS_CHILD_EFFECT
 
 local engine = {}
 
+local PropagationAction = {
+    None = 0,
+    ScheduleEffect = 1,
+    VisitChildren = 2,
+}
+
 local activeSubscriber = nil
 local runDepth = 0
 local trackingVersion = 0
-local stopInactiveNode = function() end
+local stopNodeHandler = function() end
 
-function engine.setStopInactiveNodeHandler(handler)
-    stopInactiveNode = handler or function() end
+-- 把当前 flags 翻译成传播动作。
+local function actionFromFlags(flags)
+    local action = PropagationAction.None
+
+    if constants.hasBit(flags, ReactiveFlags.Watching) then
+        action = bit.bor(action, PropagationAction.ScheduleEffect)
+    end
+
+    if constants.hasBit(flags, ReactiveFlags.Mutable) then
+        action = bit.bor(action, PropagationAction.VisitChildren)
+    end
+
+    return action
 end
 
+-- 判断动作集合是否包含某个动作。
+local function actionIncludes(action, expectedAction)
+    return bit.band(action, expectedAction) ~= 0
+end
+
+-- 注入节点失活时的停止逻辑。
+function engine.setStopHandler(handler)
+    stopNodeHandler = handler or function() end
+end
+
+-- 切换当前正在收集依赖的 subscriber。
 function engine.setActiveSub(subscriber)
     local previousSubscriber = activeSubscriber
     activeSubscriber = subscriber
     return previousSubscriber
 end
 
+-- 读取当前 active subscriber。
 function engine.getActiveSub()
     return activeSubscriber
 end
 
+-- 判断当前是否处在 effect/computed 执行栈中。
 function engine.isInsideReactiveRun()
     return runDepth ~= 0
 end
 
-function engine.beginFreshTracking(subscriber, baseFlags, shouldAdvanceVersion)
+-- 开始一轮新的依赖追踪。
+function engine.beginTrack(subscriber, baseFlags, shouldAdvanceVersion)
     if shouldAdvanceVersion then
         trackingVersion = trackingVersion + 1
     end
@@ -48,12 +79,14 @@ function engine.beginFreshTracking(subscriber, baseFlags, shouldAdvanceVersion)
     constants.setFlags(subscriber, bit.bor(baseFlags, ReactiveFlags.RecursedCheck))
 end
 
-function engine.finishFreshTracking(subscriber)
+-- 收尾追踪并清理旧依赖。
+function engine.finishTrack(subscriber)
     constants.removeFlags(subscriber, ReactiveFlags.RecursedCheck)
-    graph.removeStaleDependencyLinks(subscriber)
+    graph.unlinkStaleDeps(subscriber)
 end
 
-function engine.callWithSubscriber(subscriber, fn)
+-- 在指定 subscriber 上下文中安全执行函数。
+function engine.callWithSub(subscriber, fn)
     local previousSubscriber = engine.setActiveSub(subscriber)
     runDepth = runDepth + 1
     local ok, result = pcall(fn)
@@ -62,63 +95,66 @@ function engine.callWithSubscriber(subscriber, fn)
     return ok, result
 end
 
-function engine.trackDependencyRead(dependency)
+-- 把一次依赖读取连到当前 active subscriber。
+function engine.trackRead(dependency)
     if activeSubscriber then
-        graph.connectDependencyToSubscriber(dependency, activeSubscriber, trackingVersion)
+        graph.connect(dependency, activeSubscriber, trackingVersion)
     end
 end
 
-local function decidePropagationForSubscriber(subscriber, sourceLink, isWriteInsideReactiveRun)
+-- 决定一个 subscriber 在传播中要执行哪些动作。
+local function decidePropagation(subscriber, sourceLink, isWriteInsideReactiveRun)
     local flags = subscriber.flags or ReactiveFlags.None
     local isQueuedEffect = subscriber.isQueued == true
 
-    if not isQueuedEffect and not constants.hasAnyFlagValue(flags, constants.TRACKABLE_FLAGS) then
-        return ReactiveFlags.None
+    if not isQueuedEffect and not constants.hasAnyBits(flags, constants.TRACKABLE_FLAGS) then
+        return PropagationAction.None
     end
 
-    if not constants.hasAnyFlagValue(flags, constants.PROPAGATION_GUARD_FLAGS) then
+    if not constants.hasAnyBits(flags, constants.PROPAGATION_GUARD_FLAGS) then
         constants.setFlags(subscriber, bit.bor(flags, ReactiveFlags.Pending))
         if isWriteInsideReactiveRun then
             constants.addFlags(subscriber, ReactiveFlags.Recursed)
         end
-        return flags
+        return actionFromFlags(flags)
     end
 
-    if not constants.hasAnyFlagValue(flags, constants.RECURSION_FLAGS) then
-        return ReactiveFlags.None
+    if not constants.hasAnyBits(flags, constants.RECURSION_FLAGS) then
+        return PropagationAction.None
     end
 
-    if not constants.hasFlagValue(flags, ReactiveFlags.RecursedCheck) then
+    if not constants.hasBit(flags, ReactiveFlags.RecursedCheck) then
         constants.setFlags(
             subscriber,
             bit.bor(bit.band(flags, bit.bnot(ReactiveFlags.Recursed)), ReactiveFlags.Pending)
         )
-        return flags
+        return actionFromFlags(flags)
     end
 
-    if not constants.hasAnyFlagValue(flags, constants.DIRTY_OR_PENDING_FLAGS)
-        and graph.linkIsInsideCurrentDependencyPrefix(sourceLink, subscriber)
+    if not constants.hasAnyBits(flags, constants.DIRTY_OR_PENDING_FLAGS)
+        and graph.isLinkInCurrentDeps(sourceLink, subscriber)
     then
         constants.setFlags(subscriber, bit.bor(flags, ReactiveFlags.Recursed, ReactiveFlags.Pending))
-        return bit.band(flags, ReactiveFlags.Mutable)
+        return actionFromFlags(bit.band(flags, ReactiveFlags.Mutable))
     end
 
-    return ReactiveFlags.None
+    return PropagationAction.None
 end
 
-local function processOneInvalidatedSubscriber(link, isWriteInsideReactiveRun)
+-- 处理一条被失效传播触达的 Link。
+local function processInvalidated(link, isWriteInsideReactiveRun)
     local subscriber = link.sub
-    local propagationFlags = decidePropagationForSubscriber(
+    local propagationAction = decidePropagation(
         subscriber,
         link,
         isWriteInsideReactiveRun
     )
 
-    if constants.hasFlagValue(propagationFlags, ReactiveFlags.Watching) then
+    if actionIncludes(propagationAction, PropagationAction.ScheduleEffect) then
         scheduler.enqueueEffect(subscriber)
     end
 
-    if constants.hasFlagValue(propagationFlags, ReactiveFlags.Mutable) then
+    if actionIncludes(propagationAction, PropagationAction.VisitChildren) then
         return subscriber.subs
     end
 
@@ -134,7 +170,7 @@ signal 写入后，从它的 subs 链开始向下游走：
 
 真正是否需要重算，留到 computed 被读取或 effect 被刷新时再由脏值检查确认。
 ]]
-function engine.propagateInvalidationFrom(firstSubscriberLink, isWriteInsideReactiveRun)
+function engine.propagate(firstSubscriberLink, isWriteInsideReactiveRun)
     if not firstSubscriberLink then
         return
     end
@@ -144,7 +180,7 @@ function engine.propagateInvalidationFrom(firstSubscriberLink, isWriteInsideReac
     local stack = nil
 
     while currentLink do
-        local childSubscriberLink = processOneInvalidatedSubscriber(
+        local childSubscriberLink = processInvalidated(
             currentLink,
             isWriteInsideReactiveRun
         )
@@ -174,7 +210,8 @@ function engine.propagateInvalidationFrom(firstSubscriberLink, isWriteInsideReac
     end
 end
 
-function engine.markDirectSubscribersDirty(firstSubscriberLink)
+-- 把直接下游从 Pending 升级为 Dirty。
+function engine.markDirty(firstSubscriberLink)
     local link = firstSubscriberLink
 
     while link do
@@ -184,8 +221,8 @@ function engine.markDirectSubscribersDirty(firstSubscriberLink)
         if bit.band(flags, constants.DIRTY_OR_PENDING_FLAGS) == ReactiveFlags.Pending then
             constants.setFlags(subscriber, bit.bor(flags, ReactiveFlags.Dirty))
 
-            if constants.hasFlagValue(flags, ReactiveFlags.Watching)
-                and not constants.hasFlagValue(flags, ReactiveFlags.RecursedCheck)
+            if constants.hasBit(flags, ReactiveFlags.Watching)
+                and not constants.hasBit(flags, ReactiveFlags.RecursedCheck)
             then
                 scheduler.enqueueEffect(subscriber)
             end
@@ -195,6 +232,7 @@ function engine.markDirectSubscribersDirty(firstSubscriberLink)
     end
 end
 
+-- 提交 signal 的 pendingValue。
 function engine.commitSignalValue(signalNode)
     constants.setFlags(signalNode, ReactiveFlags.Mutable)
 
@@ -206,35 +244,31 @@ function engine.commitSignalValue(signalNode)
     return true
 end
 
-local function isSignalOrComputedNode(node)
-    return node.__type == constants.SIGNAL_MARKER
-        or node.__type == constants.COMPUTED_MARKER
-        or node.getter ~= nil
-end
-
-local function disposeChildDependencyLinks(subscriber)
-    graph.removeDependencyLinksInReverse(subscriber, function(dependency)
-        return not isSignalOrComputedNode(dependency)
+-- 释放 subscriber 下由 effect/scope 形成的子树。
+local function unlinkChildDeps(subscriber)
+    graph.unlinkDepsReverse(subscriber, function(dependency)
+        return not constants.isValueProducerNode(dependency)
     end)
 end
 
-function engine.updateComputedValue(computedNode, shouldPassOldValue)
+-- 重新计算 computed，并返回值是否真的变化。
+function engine.updateComputed(computedNode, shouldPassOldValue)
     local oldValue = computedNode.value
 
     if constants.hasFlag(computedNode, HAS_CHILD_EFFECT) then
-        disposeChildDependencyLinks(computedNode)
+        unlinkChildDeps(computedNode)
     end
 
-    engine.beginFreshTracking(computedNode, ReactiveFlags.Mutable, true)
+    engine.beginTrack(computedNode, ReactiveFlags.Mutable, true)
 
-    local ok, newValue = engine.callWithSubscriber(computedNode, function()
+    local ok, newValue = engine.callWithSub(computedNode, function()
         if shouldPassOldValue then
             return computedNode.getter(oldValue)
         end
         return computedNode.getter()
     end)
 
-    engine.finishFreshTracking(computedNode)
+    engine.finishTrack(computedNode)
 
     if not ok then
         constants.addFlags(computedNode, ReactiveFlags.Dirty)
@@ -245,12 +279,13 @@ function engine.updateComputedValue(computedNode, shouldPassOldValue)
     return newValue ~= oldValue
 end
 
-function engine.updateReactiveValue(node)
-    if node.__type == constants.COMPUTED_MARKER or node.getter then
-        return engine.updateComputedValue(node, true)
+-- 根据节点类型提交 signal 或刷新 computed。
+function engine.updateNode(node)
+    if constants.isComputedNode(node) then
+        return engine.updateComputed(node, true)
     end
 
-    if node.__type == constants.SIGNAL_MARKER then
+    if constants.isSignalNode(node) then
         return engine.commitSignalValue(node)
     end
 
@@ -258,25 +293,28 @@ function engine.updateReactiveValue(node)
     return true
 end
 
-local function markDownstreamSubscribersDirtyIfNeeded(firstSubscriberLink)
+-- 当 dependency 有多个下游时，同步升级脏标记。
+local function markDirtyMaybe(firstSubscriberLink)
     if firstSubscriberLink and firstSubscriberLink.nextSub then
-        engine.markDirectSubscribersDirty(firstSubscriberLink)
+        engine.markDirty(firstSubscriberLink)
     end
 end
 
-local function updateDependencyAndReportChange(dependency, subscriber)
+-- 更新依赖，并把结果转换成 checkDeps 的返回值。
+local function updateDepAndReport(dependency, subscriber)
     local dependencySubscribers = dependency.subs
 
-    if not engine.updateReactiveValue(dependency) then
+    if not engine.updateNode(dependency) then
         return false, false
     end
 
-    markDownstreamSubscribersDirtyIfNeeded(dependencySubscribers)
+    markDirtyMaybe(dependencySubscribers)
     return true, not constants.isInactive(subscriber)
 end
 
-local function pendingDependencyReallyChanged(dependency)
-    if engine.checkDependencyChainForChanges(dependency.deps, dependency) then
+-- 递归确认 Pending 依赖是否真的变化。
+local function pendingDepChanged(dependency)
+    if engine.checkDeps(dependency.deps, dependency) then
         return true
     end
 
@@ -284,14 +322,15 @@ local function pendingDependencyReallyChanged(dependency)
     return false
 end
 
-local function checkSingleDependencyForChanges(dependency, subscriber)
-    if constants.isMutableAndDirty(dependency) then
-        return updateDependencyAndReportChange(dependency, subscriber)
+-- 检查单个依赖是否会让 subscriber 需要刷新。
+local function checkDep(dependency, subscriber)
+    if constants.isDirtyValue(dependency) then
+        return updateDepAndReport(dependency, subscriber)
     end
 
-    if constants.isMutableAndPending(dependency) then
-        if pendingDependencyReallyChanged(dependency) then
-            return updateDependencyAndReportChange(dependency, subscriber)
+    if constants.isPendingValue(dependency) then
+        if pendingDepChanged(dependency) then
+            return updateDepAndReport(dependency, subscriber)
         end
     end
 
@@ -308,7 +347,7 @@ pending 是写入传播时留下的低成本标记。检查时沿 subscriber.dep
 
 这让 “先写成新值，再写回旧值” 不会触发无意义的 computed 重算。
 ]]
-function engine.checkDependencyChainForChanges(firstDependencyLink, subscriber)
+function engine.checkDeps(firstDependencyLink, subscriber)
     local link = firstDependencyLink
 
     while link do
@@ -317,7 +356,7 @@ function engine.checkDependencyChainForChanges(firstDependencyLink, subscriber)
         end
 
         -- shouldReturn 表示已经确认当前链路的答案，dependencyChanged 是要返回的结果。
-        local shouldReturn, dependencyChanged = checkSingleDependencyForChanges(
+        local shouldReturn, dependencyChanged = checkDep(
             link.dep,
             subscriber
         )
@@ -331,6 +370,7 @@ function engine.checkDependencyChainForChanges(firstDependencyLink, subscriber)
     return false
 end
 
+-- 判断 computed 是否需要刷新。
 function engine.computedNeedsRefresh(computedNode)
     if constants.hasFlag(computedNode, ReactiveFlags.Dirty) then
         return true
@@ -340,7 +380,7 @@ function engine.computedNeedsRefresh(computedNode)
         return false
     end
 
-    if engine.checkDependencyChainForChanges(computedNode.deps, computedNode) then
+    if engine.checkDeps(computedNode.deps, computedNode) then
         return true
     end
 
@@ -348,14 +388,15 @@ function engine.computedNeedsRefresh(computedNode)
     return false
 end
 
-function engine.runComputedForTheFirstTime(computedNode)
-    engine.beginFreshTracking(computedNode, ReactiveFlags.Mutable, false)
+-- 首次激活 lazy computed。
+function engine.initComputed(computedNode)
+    engine.beginTrack(computedNode, ReactiveFlags.Mutable, false)
 
-    local ok, initialValue = engine.callWithSubscriber(computedNode, function()
+    local ok, initialValue = engine.callWithSub(computedNode, function()
         return computedNode.getter()
     end)
 
-    engine.finishFreshTracking(computedNode)
+    engine.finishTrack(computedNode)
 
     if not ok then
         constants.addFlags(computedNode, ReactiveFlags.Dirty)
@@ -365,6 +406,7 @@ function engine.runComputedForTheFirstTime(computedNode)
     computedNode.value = initialValue
 end
 
+-- 执行并清空 effect cleanup。
 function engine.runCleanup(effectNode)
     local cleanup = effectNode.cleanup
     effectNode.cleanup = nil
@@ -383,12 +425,13 @@ function engine.runCleanup(effectNode)
     end
 end
 
+-- 执行 effect 主体并重建依赖。
 function engine.runEffectBody(effectNode)
-    engine.beginFreshTracking(effectNode, ReactiveFlags.Watching, true)
+    engine.beginTrack(effectNode, ReactiveFlags.Watching, true)
 
-    local ok, cleanupOrError = engine.callWithSubscriber(effectNode, effectNode.fn)
+    local ok, cleanupOrError = engine.callWithSub(effectNode, effectNode.fn)
 
-    engine.finishFreshTracking(effectNode)
+    engine.finishTrack(effectNode)
 
     if not ok then
         error(cleanupOrError)
@@ -397,7 +440,8 @@ function engine.runEffectBody(effectNode)
     effectNode.cleanup = cleanupOrError
 end
 
-function engine.effectNeedsToRun(effectNode)
+-- 判断入队 effect 是否真的需要运行。
+function engine.shouldRunEffect(effectNode)
     if constants.hasFlag(effectNode, ReactiveFlags.Dirty) then
         return true
     end
@@ -406,14 +450,15 @@ function engine.effectNeedsToRun(effectNode)
         return false
     end
 
-    return engine.checkDependencyChainForChanges(effectNode.deps, effectNode)
+    return engine.checkDeps(effectNode.deps, effectNode)
 end
 
-function engine.runScheduledEffect(effectNode)
+-- scheduler 调用的 effect 执行入口。
+function engine.runQueuedEffect(effectNode)
     effectNode.isQueued = false
     local flagsBeforeRun = effectNode.flags or ReactiveFlags.None
 
-    if not engine.effectNeedsToRun(effectNode) then
+    if not engine.shouldRunEffect(effectNode) then
         if not constants.isInactive(effectNode) then
             constants.setFlags(
                 effectNode,
@@ -424,7 +469,7 @@ function engine.runScheduledEffect(effectNode)
     end
 
     if constants.hasFlag(effectNode, HAS_CHILD_EFFECT) then
-        disposeChildDependencyLinks(effectNode)
+        unlinkChildDeps(effectNode)
     end
 
     if effectNode.cleanup then
@@ -437,19 +482,20 @@ function engine.runScheduledEffect(effectNode)
     engine.runEffectBody(effectNode)
 end
 
-function engine.handleNodeWithoutSubscribers(node)
+-- 处理依赖源失去最后一个订阅者的情况。
+function engine.handleUnwatched(node)
     if not constants.isMutableNode(node) then
-        stopInactiveNode(node)
+        stopNodeHandler(node)
         return
     end
 
     if node.depsTail then
         constants.setFlags(node, bit.bor(ReactiveFlags.Mutable, ReactiveFlags.Dirty))
-        graph.removeDependencyLinksInReverse(node)
+        graph.unlinkDepsReverse(node)
     end
 end
 
-scheduler.setRunEffectHandler(engine.runScheduledEffect)
-graph.setUnwatchedHandler(engine.handleNodeWithoutSubscribers)
+scheduler.setRunEffectHandler(engine.runQueuedEffect)
+graph.setUnwatchedHandler(engine.handleUnwatched)
 
 return engine

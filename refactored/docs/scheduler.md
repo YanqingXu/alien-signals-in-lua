@@ -36,7 +36,7 @@ local runEffectHandler  = ...   -- 由 engine 注入的"如何跑一个 effect"
 
 普通做法是 "把 effect 直接 push 到队尾"，但本实现里 effect 之间存在父子关系：
 当 effect A 内部用 `effect(B)` 创建子 effect 时，A 会被作为 B 的 dependency
-（通过 `connectDependencyToSubscriber(effectNode, parentSubscriber, 0)`）。
+（通过 `connect(effectNode, parentSubscriber, 0)`）。
 意味着 A 自己作为 dependency 时，它的 `subs` 链上挂着内层 effect。
 
 为了让"内层 effect 与平铺写法的同级 effect 拥有一致的执行顺序"，入队时必须：
@@ -106,18 +106,18 @@ sequenceDiagram
 
     U->>S: startBatch()  (batchDepth: 0→1)
     U->>Sg: s1(newVal)
-    Sg->>Eng: propagateInvalidationFrom(s1.subs)
+    Sg->>Eng: propagate(s1.subs)
     Eng->>S: enqueueEffect(E)
     Note over S: queue = [E]<br/>E 被去掉 Watching，避免重复入队
 
     U->>S: startBatch()  (batchDepth: 1→2)
     U->>Sg: s2(newVal)
-    Sg->>Eng: propagateInvalidationFrom(s2.subs)
+    Sg->>Eng: propagate(s2.subs)
     Eng->>S: enqueueEffect(F)
     Note over S: queue = [E, F]
 
     U->>Sg: s1(otherVal)
-    Sg->>Eng: propagateInvalidationFrom(s1.subs)
+    Sg->>Eng: propagate(s1.subs)
     Note over Eng,S: E 已无 Watching → 跳过<br/>queue 不变
 
     U->>S: endBatch()  (batchDepth: 2→1)
@@ -125,8 +125,8 @@ sequenceDiagram
 
     U->>S: endBatch()  (batchDepth: 1→0)
     S->>S: flush()
-    S->>Eng: runScheduledEffect(E)
-    S->>Eng: runScheduledEffect(F)
+    S->>Eng: runQueuedEffect(E)
+    S->>Eng: runQueuedEffect(F)
     Note over S: 队列清空，<br/>queueReadIndex/Count 归零
 ```
 
@@ -142,7 +142,7 @@ sequenceDiagram
 
 ### `setRunEffectHandler(handler)`
 
-允许 `engine` 把 `runScheduledEffect` 注入进来。默认的 handler 会主动报错，
+允许 `engine` 把 `runQueuedEffect` 注入进来。默认的 handler 会主动报错，
 保证忘记接线时能快速失败而不是静默吞掉所有 effect。
 
 ## 模块间依赖关系
@@ -156,7 +156,7 @@ sequenceDiagram
 ## 关键细节回顾
 
 - **为什么把 `Watching` 移除？** 这是入队的去重机制。已入队的 effect 不再被
-  `engine.decidePropagationForSubscriber` 视作"可入队的 watching effect"，
+  `engine.lua` 的 `decidePropagation` 视作"可入队的 watching effect"，
   避免在同一次传播中被反复 push。effect 真正跑完后会重新加回 `Watching`。
 - **为什么队列恢复时加 `Recursed`？** 让重新入队的 effect 在下一次传播判定
   里走"曾经触达过"的分支，行为与正常重新入队一致，避免被误标为脏。

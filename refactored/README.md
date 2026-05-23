@@ -40,7 +40,8 @@ refactored/
   /`Dirty`/`Pending`，以及若干位组合常量（`TRACKABLE_FLAGS`、`RECURSION_FLAGS`、
   `DIRTY_OR_PENDING_FLAGS`、`PROPAGATION_GUARD_FLAGS`）。
 - **位运算工具**：`hasFlag` / `addFlags` / `removeFlags` / `setFlags` 等，
-  以及若干语义化的判定函数 (`isMutableNode`、`isInactive`、`isMutableAndDirty` …)。
+  以及若干语义化的判定函数 (`isSignalNode`、`isMutableNode`、`isInactive`、
+  `isDirtyValue` …)。
 - **callable ↔ node 映射**：通过弱键表 `functionToNode` 将面向用户的闭包
   绑定回它所代表的节点，用于 `isSignal` 等判断。
 
@@ -53,14 +54,16 @@ refactored/
 
 对外暴露：
 - `createLink` —— 创建 Link 节点结构体。
-- `connectDependencyToSubscriber` —— 建立依赖关系，并尽量复用上一轮的旧 Link。
-- `removeDependencyLink` —— 同步从两条链上摘除一个 Link，并在依赖源失去所有
+- `connect` —— 建立依赖关系，并尽量复用上一轮的旧 Link。
+- `unlink` —— 同步从两条链上摘除一个 Link，并在依赖源失去所有
   订阅者时回调 `onDependencyBecameUnwatched`。
-- `removeDependencyLinksInReverse` —— 从 `depsTail` 反向摘除依赖，用于按 LIFO
+- `unlinkDepsReverse` —— 从 `depsTail` 反向摘除依赖，用于按 LIFO
   顺序清理嵌套 effect / scope。
-- `removeStaleDependencyLinks` —— 跑完一次 effect/computed 后清理 `depsTail`
+- `unlinkStaleDeps` —— 跑完一次 effect/computed 后清理 `depsTail`
   之后残留的旧依赖。
-- `linkIsInsideCurrentDependencyPrefix` —— 判断某个 Link 是否落在本轮已经
+- `validateDeps` / `validateSubs` —— 测试和调试
+  时检查双链 Link 的不变量。
+- `isLinkInCurrentDeps` —— 判断某个 Link 是否落在本轮已经
   重新追踪的前缀范围内（递归判定要用到）。
 
 ### `scheduler.lua` — 批量更新与 effect 调度
@@ -80,18 +83,18 @@ refactored/
 整套系统的"大脑"：负责依赖追踪、失效传播、脏值检查与 effect 重跑。它不创建
 用户直接调用的函数，但提供给 `primitives` 几乎全部底层算子：
 
-- **活动订阅者管理**：`setActiveSub` / `getActiveSub` / `callWithSubscriber`，
-  维护读取上下文与 `runDepth`，让 `trackDependencyRead` 知道该把依赖连到谁。
-- **追踪生命周期**：`beginFreshTracking` / `finishFreshTracking` 推进
+- **活动订阅者管理**：`setActiveSub` / `getActiveSub` / `callWithSub`，
+  维护读取上下文与 `runDepth`，让 `trackRead` 知道该把依赖连到谁。
+- **追踪生命周期**：`beginTrack` / `finishTrack` 推进
   `trackingVersion`、清空 `depsTail`、扫除旧依赖。
-- **失效传播**：`propagateInvalidationFrom` 以显式栈代替递归遍历下游图，
+- **失效传播**：`propagate` 以显式栈代替递归遍历下游图，
   只做"标记+入队"，不立即重算。
-- **脏值检查**：`checkDependencyChainForChanges` / `computedNeedsRefresh` /
-  `effectNeedsToRun` 按需把 `Pending` 还原为 `Dirty` 或撤销，避免无意义重算。
-- **节点重算**：`commitSignalValue` / `updateComputedValue` /
-  `runComputedForTheFirstTime` / `runEffectBody` / `runCleanup` /
-  `runScheduledEffect`。
-- **资源回收**：`handleNodeWithoutSubscribers` 在 `graph` 检测到依赖源无人订阅
+- **脏值检查**：`checkDeps` / `computedNeedsRefresh` /
+  `shouldRunEffect` 按需把 `Pending` 还原为 `Dirty` 或撤销，避免无意义重算。
+- **节点重算**：`commitSignalValue` / `updateComputed` /
+  `initComputed` / `runEffectBody` / `runCleanup` /
+  `runQueuedEffect`。
+- **资源回收**：`handleUnwatched` 在 `graph` 检测到依赖源无人订阅
   时被回调，安排无观察者的 computed 进入"懒态"，effect 进入停止流程。
 
 启动末尾还把自身回调注入 `scheduler` 与 `graph`，闭合模块协作环。
@@ -101,10 +104,10 @@ refactored/
 把 `engine`、`graph`、`scheduler` 提供的算子组装成最终的响应式原语：
 
 - `signal(initialValue)` —— 创建 `SIGNAL_MARKER` 节点；返回的 callable
-  无参数即"读"，传入新值即"写"，写入时调用 `engine.propagateInvalidationFrom`
+  无参数即"读"，传入新值即"写"，写入时调用 `engine.propagate`
   传播失效。
 - `computed(getter)` —— 创建 `COMPUTED_MARKER` 节点；读取时按需调用
-  `computedNeedsRefresh` + `updateComputedValue`，惰性求值。
+  `computedNeedsRefresh` + `updateComputed`，惰性求值。
 - `effect(fn)` —— 立即跑一次并注册依赖，返回 `stop` callable。支持
   通过 `fn` 返回 cleanup 函数，在重跑或停止前调用。
 - `effectScope(fn)` —— 创建一个可批量回收子 effect 的作用域节点。
@@ -113,7 +116,7 @@ refactored/
 - `isSignal` / `isComputed` / `isEffect` / `isEffectScope` —— 通过
   `constants.functionToNode` 反查 callable 背后的节点类型。
 
-启动末尾注册 `stopInactiveNode` 为 `engine.setStopInactiveNodeHandler`，
+启动末尾注册 `stopNode` 为 `engine.setStopHandler`，
 让 `engine` 在节点失去全部订阅者时能够安全停止用户作用域。
 
 ## 模块依赖关系
@@ -136,7 +139,7 @@ init.lua
 - `graph` / `scheduler` 只依赖 `constants`。
 - `engine` 依赖 `constants` / `graph` / `scheduler`，并向后两者注入回调
   (`runEffectHandler`、`unwatched handler`) 形成协作环。
-- `primitives` 依赖前面四者，并向 `engine` 注入 `stopInactiveNode`。
+- `primitives` 依赖前面四者，并向 `engine` 注入 `stopNode`。
 - `init` 只依赖 `primitives`、`scheduler`、`engine`、`constants`，
   仅做 API 聚合。
 

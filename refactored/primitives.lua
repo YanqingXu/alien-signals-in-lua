@@ -17,10 +17,39 @@ local HAS_CHILD_EFFECT = constants.HAS_CHILD_EFFECT
 
 local primitives = {}
 
-local stopEffectScopeNode
-local stopInactiveNode
+local stopScopeNode
+local stopNode
 
-local function signalOperation(signalNode, ...)
+-- 创建只有下游订阅者链的节点。
+local function newDepNode(marker, flags)
+    return {
+        __type = marker,
+        subs = nil,
+        subsTail = nil,
+        flags = flags,
+    }
+end
+
+-- 创建同时拥有 deps/subs 两条链的节点。
+local function newSubNode(marker, flags)
+    local node = newDepNode(marker, flags)
+    node.deps = nil
+    node.depsTail = nil
+    return node
+end
+
+-- 把子 effect/scope 连接到当前父节点。
+local function linkChild(childNode, parentSubscriber)
+    if not parentSubscriber then
+        return
+    end
+
+    graph.connect(childNode, parentSubscriber, 0)
+    constants.addFlags(parentSubscriber, HAS_CHILD_EFFECT)
+end
+
+-- signal 的 getter/setter 实现。
+local function signalOp(signalNode, ...)
     if select("#", ...) > 0 then
         local nextValue = select(1, ...)
 
@@ -29,7 +58,7 @@ local function signalOperation(signalNode, ...)
             constants.setFlags(signalNode, bit.bor(ReactiveFlags.Mutable, ReactiveFlags.Dirty))
 
             if signalNode.subs then
-                engine.propagateInvalidationFrom(signalNode.subs, engine.isInsideReactiveRun())
+                engine.propagate(signalNode.subs, engine.isInsideReactiveRun())
                 if scheduler.getBatchDepth() == 0 then
                     scheduler.flush()
                 end
@@ -41,139 +70,118 @@ local function signalOperation(signalNode, ...)
 
     if constants.hasFlag(signalNode, ReactiveFlags.Dirty) then
         if engine.commitSignalValue(signalNode) and signalNode.subs then
-            engine.markDirectSubscribersDirty(signalNode.subs)
+            engine.markDirty(signalNode.subs)
         end
     end
 
-    engine.trackDependencyRead(signalNode)
+    engine.trackRead(signalNode)
     return signalNode.currentValue
 end
 
+-- 创建用户可调用的 signal。
 function primitives.signal(initialValue)
-    local signalNode = {
-        __type = constants.SIGNAL_MARKER,
-        currentValue = initialValue,
-        pendingValue = initialValue,
-        subs = nil,
-        subsTail = nil,
-        flags = ReactiveFlags.Mutable,
-    }
+    local signalNode = newDepNode(constants.SIGNAL_MARKER, ReactiveFlags.Mutable)
+    signalNode.currentValue = initialValue
+    signalNode.pendingValue = initialValue
 
-    return constants.bind(signalOperation, signalNode)
+    return constants.bind(signalOp, signalNode)
 end
 
-local function computedOperation(computedNode)
+-- computed 的懒读取实现。
+local function computedOp(computedNode)
     if engine.computedNeedsRefresh(computedNode) then
-        if engine.updateComputedValue(computedNode, true) and computedNode.subs then
-            engine.markDirectSubscribersDirty(computedNode.subs)
+        if engine.updateComputed(computedNode, true) and computedNode.subs then
+            engine.markDirty(computedNode.subs)
         end
     elseif constants.isInactive(computedNode) then
-        engine.runComputedForTheFirstTime(computedNode)
+        engine.initComputed(computedNode)
     end
 
-    engine.trackDependencyRead(computedNode)
+    engine.trackRead(computedNode)
     return computedNode.value
 end
 
+-- 创建用户可调用的 computed。
 function primitives.computed(getter)
-    local computedNode = {
-        __type = constants.COMPUTED_MARKER,
-        value = nil,
-        getter = getter,
-        deps = nil,
-        depsTail = nil,
-        subs = nil,
-        subsTail = nil,
-        flags = ReactiveFlags.None,
-    }
+    local computedNode = newSubNode(constants.COMPUTED_MARKER, ReactiveFlags.None)
+    computedNode.value = nil
+    computedNode.getter = getter
 
-    return constants.bind(computedOperation, computedNode)
+    return constants.bind(computedOp, computedNode)
 end
 
-local function stopEffectNode(effectNode)
-    stopEffectScopeNode(effectNode)
+-- 停止 effect：先停子树，再执行自身 cleanup。
+local function stopEffect(effectNode)
+    stopScopeNode(effectNode)
     if effectNode.cleanup then
         engine.runCleanup(effectNode)
     end
     constants.setFlags(effectNode, ReactiveFlags.None)
 end
 
+-- 创建立即执行并自动追踪依赖的 effect。
 function primitives.effect(fn)
-    local effectNode = {
-        __type = constants.EFFECT_MARKER,
-        fn = fn,
-        cleanup = nil,
-        deps = nil,
-        depsTail = nil,
-        subs = nil,
-        subsTail = nil,
-        flags = bit.bor(ReactiveFlags.Watching, ReactiveFlags.RecursedCheck),
-    }
+    local effectNode = newSubNode(
+        constants.EFFECT_MARKER,
+        bit.bor(ReactiveFlags.Watching, ReactiveFlags.RecursedCheck)
+    )
+    effectNode.fn = fn
+    effectNode.cleanup = nil
 
     local parentSubscriber = engine.getActiveSub()
-    if parentSubscriber then
-        graph.connectDependencyToSubscriber(effectNode, parentSubscriber, 0)
-        constants.addFlags(parentSubscriber, HAS_CHILD_EFFECT)
-    end
+    linkChild(effectNode, parentSubscriber)
 
-    local ok, cleanupOrError = engine.callWithSubscriber(effectNode, fn)
+    local ok, cleanupOrError = engine.callWithSub(effectNode, fn)
 
     constants.removeFlags(effectNode, ReactiveFlags.RecursedCheck)
-    graph.removeStaleDependencyLinks(effectNode)
+    graph.unlinkStaleDeps(effectNode)
 
     if not ok then
-        stopEffectScopeNode(effectNode)
+        stopScopeNode(effectNode)
         error(cleanupOrError)
     end
 
     effectNode.cleanup = cleanupOrError
-    return constants.bind(stopEffectNode, effectNode)
+    return constants.bind(stopEffect, effectNode)
 end
 
-stopEffectScopeNode = function(scopeNode)
+-- 停止 scope/effect 的共同清理流程。
+stopScopeNode = function(scopeNode)
     scopeNode.isQueued = false
     constants.setFlags(scopeNode, ReactiveFlags.None)
-    graph.removeDependencyLinksInReverse(scopeNode)
+    graph.unlinkDepsReverse(scopeNode)
 
     while scopeNode.subs do
-        graph.removeDependencyLink(scopeNode.subs)
+        graph.unlink(scopeNode.subs)
     end
 end
 
-stopInactiveNode = function(node)
-    if node.__type == constants.EFFECT_MARKER or node.fn then
-        stopEffectNode(node)
+-- 按节点类型分发失活停止逻辑。
+stopNode = function(node)
+    if constants.isEffectNode(node) then
+        stopEffect(node)
         return
     end
 
-    stopEffectScopeNode(node)
+    stopScopeNode(node)
 end
 
+-- 创建可批量停止子 effect 的 scope。
 function primitives.effectScope(fn)
-    local scopeNode = {
-        __type = constants.EFFECT_SCOPE_MARKER,
-        deps = nil,
-        depsTail = nil,
-        subs = nil,
-        subsTail = nil,
-        flags = ReactiveFlags.Mutable,
-    }
+    local scopeNode = newSubNode(constants.EFFECT_SCOPE_MARKER, ReactiveFlags.Mutable)
 
     local parentSubscriber = engine.setActiveSub(scopeNode)
-    if parentSubscriber then
-        graph.connectDependencyToSubscriber(scopeNode, parentSubscriber, 0)
-        constants.addFlags(parentSubscriber, HAS_CHILD_EFFECT)
-    end
+    linkChild(scopeNode, parentSubscriber)
 
     local ok, err = pcall(fn)
     engine.setActiveSub(parentSubscriber)
 
     if not ok then
-        stopEffectScopeNode(scopeNode)
+        stopScopeNode(scopeNode)
         error(err)
     end
 
-    return constants.bind(stopEffectScopeNode, scopeNode)
+    return constants.bind(stopScopeNode, scopeNode)
 end
 
 --[[
@@ -198,11 +206,11 @@ function primitives.trigger(fn)
     local link = temporarySubscriber.deps
     while link do
         local dependency = link.dep
-        link = graph.removeDependencyLink(link, temporarySubscriber)
+        link = graph.unlink(link, temporarySubscriber)
 
         if dependency.subs then
-            engine.propagateInvalidationFrom(dependency.subs, engine.isInsideReactiveRun())
-            engine.markDirectSubscribersDirty(dependency.subs)
+            engine.propagate(dependency.subs, engine.isInsideReactiveRun())
+            engine.markDirty(dependency.subs)
         end
     end
 
@@ -215,26 +223,30 @@ function primitives.trigger(fn)
     end
 end
 
+-- 判断 callable 是否是 signal。
 function primitives.isSignal(value)
     local node = constants.nodeForCallable(value)
-    return node ~= nil and node.__type == constants.SIGNAL_MARKER
+    return constants.isSignalNode(node)
 end
 
+-- 判断 callable 是否是 computed。
 function primitives.isComputed(value)
     local node = constants.nodeForCallable(value)
-    return node ~= nil and node.__type == constants.COMPUTED_MARKER
+    return constants.isComputedNode(node)
 end
 
+-- 判断 callable 是否是 effect stop 函数。
 function primitives.isEffect(value)
     local node = constants.nodeForCallable(value)
-    return node ~= nil and node.__type == constants.EFFECT_MARKER
+    return constants.isEffectNode(node)
 end
 
+-- 判断 callable 是否是 effectScope stop 函数。
 function primitives.isEffectScope(value)
     local node = constants.nodeForCallable(value)
-    return node ~= nil and node.__type == constants.EFFECT_SCOPE_MARKER
+    return constants.isEffectScopeNode(node)
 end
 
-engine.setStopInactiveNodeHandler(stopInactiveNode)
+engine.setStopHandler(stopNode)
 
 return primitives

@@ -9,6 +9,7 @@ local graph = {}
 
 local onDependencyBecameUnwatched = function() end
 
+-- 注入依赖源无人订阅时的回调。
 function graph.setUnwatchedHandler(handler)
     onDependencyBecameUnwatched = handler or function() end
 end
@@ -28,6 +29,7 @@ Link 字段词汇表
 因此 Sub/Dep 后缀说的是“这根指针服务哪条链”，不是 Link 另一端的节点类型。
 删除 Link 时必须同时修复这两条链，否则会留下悬挂引用。
 ]]
+-- 创建一条同时挂入两条链的边。
 function graph.createLink(
     dependency,
     subscriber,
@@ -47,7 +49,8 @@ function graph.createLink(
     }
 end
 
-local function insertIntoSubscriberDependencies(
+-- 把 Link 接到 subscriber.deps 链上。
+local function insertDepLink(
     subscriber,
     link,
     previousDependencyLink,
@@ -66,7 +69,8 @@ local function insertIntoSubscriberDependencies(
     subscriber.depsTail = link
 end
 
-local function appendIntoDependencySubscribers(dependency, link, previousSubscriberLink)
+-- 把 Link 追加到 dependency.subs 链上。
+local function appendSubLink(dependency, link, previousSubscriberLink)
     if previousSubscriberLink then
         previousSubscriberLink.nextSub = link
     else
@@ -87,7 +91,7 @@ end
 顺序与上一轮一致，可以复用旧 Link。重跑结束后，depsTail 后方的旧 Link 就是
 “本轮没有再读取”的陈旧依赖。
 ]]
-function graph.connectDependencyToSubscriber(dependency, subscriber, version)
+function graph.connect(dependency, subscriber, version)
     local previousDependencyLink = subscriber.depsTail
 
     if previousDependencyLink and previousDependencyLink.dep == dependency then
@@ -125,8 +129,8 @@ function graph.connectDependencyToSubscriber(dependency, subscriber, version)
     )
     link.version = version
 
-    insertIntoSubscriberDependencies(subscriber, link, previousDependencyLink, nextDependencyLink)
-    appendIntoDependencySubscribers(dependency, link, previousSubscriberLink)
+    insertDepLink(subscriber, link, previousDependencyLink, nextDependencyLink)
+    appendSubLink(dependency, link, previousSubscriberLink)
 end
 
 --[[
@@ -136,7 +140,7 @@ end
 走到已经无效的订阅者。移除后如果 dependency 已经没有任何订阅者，会通知上层
 算法清理它的上游依赖。
 ]]
-function graph.removeDependencyLink(link, explicitSubscriber)
+function graph.unlink(link, explicitSubscriber)
     local subscriber = explicitSubscriber or link.sub
     local dependency = link.dep
 
@@ -181,21 +185,113 @@ function graph.removeDependencyLink(link, explicitSubscriber)
     return nextDependencyLink
 end
 
-function graph.removeDependencyLinksInReverse(subscriber, shouldRemoveDependency)
+-- 从 depsTail 反向摘除依赖，常用于 LIFO cleanup。
+function graph.unlinkDepsReverse(subscriber, shouldRemoveDependency)
     local link = subscriber.depsTail
 
     while link do
         local previousDependencyLink = link.prevDep
 
         if not shouldRemoveDependency or shouldRemoveDependency(link.dep, link) then
-            graph.removeDependencyLink(link, subscriber)
+            graph.unlink(link, subscriber)
         end
 
         link = previousDependencyLink
     end
 end
 
-function graph.removeStaleDependencyLinks(subscriber)
+-- 在 dependency.subs 链里查找指定 Link。
+local function hasSubLink(dependency, linkToFind)
+    local link = dependency.subs
+    while link do
+        if link == linkToFind then
+            return true
+        end
+        link = link.nextSub
+    end
+    return false
+end
+
+-- 在 subscriber.deps 链里查找指定 Link。
+local function hasDepLink(subscriber, linkToFind)
+    local link = subscriber.deps
+    while link do
+        if link == linkToFind then
+            return true
+        end
+        link = link.nextDep
+    end
+    return false
+end
+
+-- 校验 subscriber.deps 链是否自洽。
+function graph.validateDeps(subscriber)
+    local previousLink = nil
+    local link = subscriber.deps
+
+    if link == nil and subscriber.depsTail ~= nil then
+        return false, "subscriber.depsTail is set while subscriber.deps is nil"
+    end
+
+    while link do
+        if link.sub ~= subscriber then
+            return false, "dependency link points at a different subscriber"
+        end
+
+        if link.prevDep ~= previousLink then
+            return false, "dependency prevDep pointer is inconsistent"
+        end
+
+        if link.dep == nil or not hasSubLink(link.dep, link) then
+            return false, "dependency link is missing from dependency.subs"
+        end
+
+        previousLink = link
+        link = link.nextDep
+    end
+
+    if previousLink ~= subscriber.depsTail then
+        return false, "subscriber.depsTail does not point at the last dependency link"
+    end
+
+    return true
+end
+
+-- 校验 dependency.subs 链是否自洽。
+function graph.validateSubs(dependency)
+    local previousLink = nil
+    local link = dependency.subs
+
+    if link == nil and dependency.subsTail ~= nil then
+        return false, "dependency.subsTail is set while dependency.subs is nil"
+    end
+
+    while link do
+        if link.dep ~= dependency then
+            return false, "subscriber link points at a different dependency"
+        end
+
+        if link.prevSub ~= previousLink then
+            return false, "subscriber prevSub pointer is inconsistent"
+        end
+
+        if link.sub == nil or not hasDepLink(link.sub, link) then
+            return false, "subscriber link is missing from subscriber.deps"
+        end
+
+        previousLink = link
+        link = link.nextSub
+    end
+
+    if previousLink ~= dependency.subsTail then
+        return false, "dependency.subsTail does not point at the last subscriber link"
+    end
+
+    return true
+end
+
+-- 移除本轮追踪没有再次读到的旧依赖。
+function graph.unlinkStaleDeps(subscriber)
     local firstStaleLink
     if subscriber.depsTail then
         firstStaleLink = subscriber.depsTail.nextDep
@@ -204,11 +300,12 @@ function graph.removeStaleDependencyLinks(subscriber)
     end
 
     while firstStaleLink do
-        firstStaleLink = graph.removeDependencyLink(firstStaleLink, subscriber)
+        firstStaleLink = graph.unlink(firstStaleLink, subscriber)
     end
 end
 
-function graph.linkIsInsideCurrentDependencyPrefix(linkToFind, subscriber)
+-- 判断 Link 是否在本轮已重新追踪的前缀内。
+function graph.isLinkInCurrentDeps(linkToFind, subscriber)
     local link = subscriber.depsTail
     while link do
         if link == linkToFind then

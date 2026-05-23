@@ -97,7 +97,7 @@ DIRTY_OR_PENDING_FLAGS  = Dirty | Pending
 PROPAGATION_GUARD_FLAGS = RecursedCheck | Recursed | Dirty | Pending
 ```
 
-这些组合在传播算法（`engine.decidePropagationForSubscriber`）和脏值检查里
+这些组合在传播算法（`engine.lua` 的 `decidePropagation`）和脏值检查里
 被高频使用，预先合好可省去每次重新 `bit.bor`。
 
 #### 位图速查（bit5..bit0）
@@ -121,25 +121,29 @@ PROPAGATION_GUARD_FLAGS = RecursedCheck | Recursed | Dirty | Pending
 
 | 判定 | 等价表达 | 用途 |
 | --- | --- | --- |
-| `hasAnyFlagValue(flags, TRACKABLE_FLAGS)` | flags & 3 ≠ 0 | 节点是否值得参与传播 |
-| `hasAnyFlagValue(flags, RECURSION_FLAGS)` | flags & 12 ≠ 0 | 节点是否处于追踪/已触达递归路径 |
-| `hasAnyFlagValue(flags, DIRTY_OR_PENDING_FLAGS)` | flags & 48 ≠ 0 | 节点是否已被打上某种"脏"标记 |
-| `hasAnyFlagValue(flags, PROPAGATION_GUARD_FLAGS)` | flags & 60 ≠ 0 | 传播时是否需要走"已触达"分支 |
-| `isMutableAndDirty(node)` | flags & 17 == 17 | signal 写入后等待 commit 的状态 |
-| `isMutableAndPending(node)` | flags & 33 == 33 | computed 上游被打 Pending 的状态 |
+| `hasAnyBits(flags, TRACKABLE_FLAGS)` | flags & 3 ≠ 0 | 节点是否值得参与传播 |
+| `hasAnyBits(flags, RECURSION_FLAGS)` | flags & 12 ≠ 0 | 节点是否处于追踪/已触达递归路径 |
+| `hasAnyBits(flags, DIRTY_OR_PENDING_FLAGS)` | flags & 48 ≠ 0 | 节点是否已被打上某种"脏"标记 |
+| `hasAnyBits(flags, PROPAGATION_GUARD_FLAGS)` | flags & 60 ≠ 0 | 传播时是否需要走"已触达"分支 |
+| `isDirtyValue(node)` | flags & 17 == 17 | signal 写入后等待 commit 的状态 |
+| `isPendingValue(node)` | flags & 33 == 33 | computed 上游被打 Pending 的状态 |
 
-> 这些"按位组合 + 整数比较"是该实现性能的核心。`decidePropagationForSubscriber`
+> 这些"按位组合 + 整数比较"是该实现性能的核心。`decidePropagation`
 > 在最坏路径下也只做 4~5 次 `bit.band`，没有任何分配。
 
 ### 位运算工具
 
 - `hasFlag(node, flag)` —— 判断单个标志。
-- `hasAnyFlagValue` / `hasAllFlagValues` —— 判断一组标志是"有任意一个"还是
+- `hasAnyBits` / `hasAllBits` —— 判断一组标志是"有任意一个"还是
   "全部都有"。
+- `isSignalNode` / `isComputedNode` / `isEffectNode` / `isEffectScopeNode` ——
+  基于 marker 判断内部节点类型，避免在算法层散落 `node.__type == ...`。
+- `isValueProducerNode` —— 判断节点是否是 signal/computed，用于 cleanup 时
+  区分普通值依赖和子 effect/scope。
 - `addFlags` / `removeFlags` / `setFlags` —— 写入侧的便捷封装；做了
   `node.flags or None` 的兜底，使刚创建尚未设置 `flags` 的节点也安全可用。
 - `isMutableNode` / `isWatchingEffect` / `isInactive` /
-  `isMutableAndDirty` / `isMutableAndPending` —— 语义化判定，
+  `isDirtyValue` / `isPendingValue` —— 语义化判定，
   让调用方读起来更接近自然语言。
 
 ## 模块间依赖关系
