@@ -241,6 +241,46 @@ function engine.updateReactiveValue(node)
     return true
 end
 
+local function markDownstreamSubscribersDirtyIfNeeded(firstSubscriberLink)
+    if firstSubscriberLink and firstSubscriberLink.nextSub then
+        engine.markDirectSubscribersDirty(firstSubscriberLink)
+    end
+end
+
+local function updateDependencyAndReportChange(dependency, subscriber)
+    local dependencySubscribers = dependency.subs
+
+    if not engine.updateReactiveValue(dependency) then
+        return false, false
+    end
+
+    markDownstreamSubscribersDirtyIfNeeded(dependencySubscribers)
+    return true, not constants.isInactive(subscriber)
+end
+
+local function pendingDependencyReallyChanged(dependency)
+    if engine.checkDependencyChainForChanges(dependency.deps, dependency) then
+        return true
+    end
+
+    constants.removeFlags(dependency, ReactiveFlags.Pending)
+    return false
+end
+
+local function checkSingleDependencyForChanges(dependency, subscriber)
+    if constants.isMutableAndDirty(dependency) then
+        return updateDependencyAndReportChange(dependency, subscriber)
+    end
+
+    if constants.isMutableAndPending(dependency) then
+        if pendingDependencyReallyChanged(dependency) then
+            return updateDependencyAndReportChange(dependency, subscriber)
+        end
+    end
+
+    return false, false
+end
+
 --[[
 脏值检查：把“可能变了”还原成“真的变了 / 其实没变”。
 
@@ -255,37 +295,17 @@ function engine.checkDependencyChainForChanges(firstDependencyLink, subscriber)
     local link = firstDependencyLink
 
     while link do
-        local dependency = link.dep
-
         if constants.hasFlag(subscriber, ReactiveFlags.Dirty) then
             return not constants.isInactive(subscriber)
         end
 
-        if constants.isMutableAndDirty(dependency) then
-            local dependencySubscribers = dependency.subs
-            if engine.updateReactiveValue(dependency) then
-                if dependencySubscribers and dependencySubscribers.nextSub then
-                    engine.markDirectSubscribersDirty(dependencySubscribers)
-                end
-                return not constants.isInactive(subscriber)
-            end
-        elseif constants.isMutableAndPending(dependency) then
-            local dependencyReallyChanged = engine.checkDependencyChainForChanges(
-                dependency.deps,
-                dependency
-            )
-
-            if dependencyReallyChanged then
-                local dependencySubscribers = dependency.subs
-                if engine.updateReactiveValue(dependency) then
-                    if dependencySubscribers and dependencySubscribers.nextSub then
-                        engine.markDirectSubscribersDirty(dependencySubscribers)
-                    end
-                    return not constants.isInactive(subscriber)
-                end
-            else
-                constants.removeFlags(dependency, ReactiveFlags.Pending)
-            end
+        -- shouldReturn 表示已经确认当前链路的答案，dependencyChanged 是要返回的结果。
+        local shouldReturn, dependencyChanged = checkSingleDependencyForChanges(
+            link.dep,
+            subscriber
+        )
+        if shouldReturn then
+            return dependencyChanged
         end
 
         link = link.nextDep

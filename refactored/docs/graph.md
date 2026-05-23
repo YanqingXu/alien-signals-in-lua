@@ -28,6 +28,25 @@
 }
 ```
 
+### 字段词汇表
+
+`Link` 的字段名刻意很短，因为它们位于热路径；阅读时建议先把它们翻译成下面
+这张表：
+
+| 字段 | 展开读法 | 所属链 | 含义 |
+| --- | --- | --- | --- |
+| `dep` | dependency | 边的端点 | 这条边的依赖源，例如 signal 或 computed |
+| `sub` | subscriber | 边的端点 | 这条边的订阅者，例如 computed 或 effect |
+| `prevSub` | previous subscriber-link | `dep.subs` 链 | 同一个依赖源的上一个订阅者 Link |
+| `nextSub` | next subscriber-link | `dep.subs` 链 | 同一个依赖源的下一个订阅者 Link |
+| `prevDep` | previous dependency-link | `sub.deps` 链 | 同一个订阅者的上一个依赖 Link |
+| `nextDep` | next dependency-link | `sub.deps` 链 | 同一个订阅者的下一个依赖 Link |
+| `version` | tracking generation | 去重标记 | 记录这条边最后一次被哪一轮追踪触达 |
+
+最容易误读的是 `prevSub/nextSub`：它们不是“指向 subscriber 节点”，而是
+“在 `dependency.subs` 这条订阅者链上的前后 Link”。同理，`prevDep/nextDep`
+也不是“指向 dependency 节点”，而是在 `subscriber.deps` 依赖链上移动。
+
 ### Link 作为"桥梁"：同时存在于两条链上
 
 每一个 `Link` 同时属于两条互相正交的双向链表。下面的图展示了 2 个依赖源

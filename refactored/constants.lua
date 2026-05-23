@@ -16,6 +16,22 @@ constants.EFFECT_SCOPE_MARKER = {}
 
 constants.functionToNode = setmetatable({}, { __mode = "k" })
 
+--[[
+ReactiveFlags 词汇表
+
+这些名字尽量贴近原实现，但阅读时可以把它们理解成下面的问题：
+
+- None          节点已经停止，或尚未进入响应式图。
+- Mutable       这个节点会产出值，且可以作为依赖源被下游订阅。
+- Watching      这个节点是活跃 effect，失效传播时需要被调度。
+- RecursedCheck 节点正在重建自己的依赖链，传播时要处理自递归场景。
+- Recursed      失效传播已经在递归路径中再次触达过这个节点。
+- Dirty         值已经确定需要提交或重算。
+- Pending       上游可能变了，等下一次读取/刷新时再确认。
+
+一句话区分 Dirty 与 Pending：
+Dirty 是“必须检查自己”，Pending 是“先去问上游到底有没有真的变”。
+]]
 constants.ReactiveFlags = {
     None = 0,
     Mutable = 1,

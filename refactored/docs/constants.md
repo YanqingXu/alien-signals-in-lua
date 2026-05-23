@@ -56,6 +56,27 @@ callable 之后，对应条目可以被 GC 回收。
 把状态压缩进单个整数，让"节点处于哪些组合状态"成为一次 `bit.band`/`bit.bor`，
 是该响应式实现性能优势的根源之一。
 
+### 阅读词汇表：把 flags 翻译成问题
+
+读 `engine.lua` 时，不要先把 flags 当成二进制位看；可以先把它们翻译成
+算法正在回答的问题：
+
+| 标志 | 可以翻译成的问题 | 常见出现位置 |
+| --- | --- | --- |
+| `Mutable` | 这个节点会产出值吗？它能继续向下游传播吗？ | signal、已激活 computed、scope |
+| `Watching` | 这个 effect 还活着吗？失效时要不要入队？ | effect 节点、scheduler 入队去重 |
+| `RecursedCheck` | 这个节点正在重建依赖链吗？ | effect/computed 执行 getter 或 fn 时 |
+| `Recursed` | 传播是否在递归路径里又碰到它？ | 写入发生在响应式运行内部时 |
+| `Dirty` | 它自己的值是否已经确定需要提交或重算？ | signal 写入、computed 需要重算 |
+| `Pending` | 它的上游可能变了，但还没确认吗？ | PUSH 阶段传播、PULL 阶段确认 |
+
+两组对照最重要：
+
+| 对照 | 教学理解 |
+| --- | --- |
+| `Dirty` vs `Pending` | `Dirty` 是“我自己要检查”，`Pending` 是“我得先问上游有没有真的变” |
+| `Mutable` vs `Watching` | `Mutable` 节点负责产出值并继续传播，`Watching` 节点负责被调度重跑 |
+
 ### 预组合常量
 
 ```lua

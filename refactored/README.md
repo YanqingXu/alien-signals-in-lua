@@ -142,8 +142,9 @@ init.lua
 
 每个核心模块都有独立的技术文档，深入描述设计动机、内部数据结构与关键算法：
 
-- [`docs/constants.md`](../docs/constants.md)
-- [`docs/graph.md`](../docs/graph.md)
-- [`docs/scheduler.md`](../docs/scheduler.md)
-- [`docs/engine.md`](../docs/engine.md)
-- [`docs/primitives.md`](../docs/primitives.md)
+- [`docs/constants.md`](docs/constants.md)
+- [`docs/graph.md`](docs/graph.md)
+- [`docs/scheduler.md`](docs/scheduler.md)
+- [`docs/engine.md`](docs/engine.md)
+- [`docs/primitives.md`](docs/primitives.md)
+- [`docs/from-naive-map-to-link.md`](docs/from-naive-map-to-link.md)

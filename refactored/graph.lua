@@ -13,6 +13,21 @@ function graph.setUnwatchedHandler(handler)
     onDependencyBecameUnwatched = handler or function() end
 end
 
+--[[
+Link 字段词汇表
+
+一个 Link 是 dependency -> subscriber 这条边，但它同时属于两条链：
+
+1. dependency.subs 链：从依赖源找到所有订阅者。
+   - dep/sub 表示这条边两端的节点。
+   - prevSub/nextSub 是 Link 在 dependency.subs 链里的前后指针。
+
+2. subscriber.deps 链：从订阅者找到本轮读取过的依赖。
+   - prevDep/nextDep 是同一个 Link 在 subscriber.deps 链里的前后指针。
+
+因此 Sub/Dep 后缀说的是“这根指针服务哪条链”，不是 Link 另一端的节点类型。
+删除 Link 时必须同时修复这两条链，否则会留下悬挂引用。
+]]
 function graph.createLink(
     dependency,
     subscriber,
