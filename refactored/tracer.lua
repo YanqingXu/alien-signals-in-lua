@@ -214,11 +214,15 @@ function tracer.flagsText(flags)
     return table.concat(names, "|")
 end
 
--- 返回节点的稳定调试标签。
+-- 返回节点的稳定调试标签。如果节点有 customLabel，优先使用它。
 function tracer.nodeLabel(node)
     local id = ensureNodeId(node)
     if not id then
         return "nil"
+    end
+
+    if type(node.customLabel) == "string" and node.customLabel ~= "" then
+        return nodeKind(node) .. "#" .. node.customLabel
     end
 
     return nodeKind(node) .. "#" .. tostring(id)

@@ -98,10 +98,11 @@ local function signalOp(signalNode, ...)
 end
 
 -- 创建用户可调用的 signal。
-function primitives.signal(initialValue)
+function primitives.signal(initialValue, label)
     local signalNode = newDepNode(constants.SIGNAL_MARKER, ReactiveFlags.Mutable)
     signalNode.currentValue = initialValue
     signalNode.pendingValue = initialValue
+    signalNode.customLabel = label
 
     tracer.emit("node:create", signalNode, {
         value = tracer.value(initialValue),
@@ -127,10 +128,11 @@ local function computedOp(computedNode)
 end
 
 -- 创建用户可调用的 computed。
-function primitives.computed(getter)
+function primitives.computed(getter, label)
     local computedNode = newSubNode(constants.COMPUTED_MARKER, ReactiveFlags.None)
     computedNode.value = nil
     computedNode.getter = getter
+    computedNode.customLabel = label
 
     tracer.emit("node:create", computedNode)
 
@@ -158,13 +160,14 @@ local function stopEffect(effectNode)
 end
 
 -- 创建立即执行并自动追踪依赖的 effect。
-function primitives.effect(fn)
+function primitives.effect(fn, label)
     local effectNode = newSubNode(
         constants.EFFECT_MARKER,
         bit.bor(ReactiveFlags.Watching, ReactiveFlags.RecursedCheck)
     )
     effectNode.fn = fn
     effectNode.cleanup = nil
+    effectNode.customLabel = label
 
     tracer.emit("node:create", effectNode)
 
