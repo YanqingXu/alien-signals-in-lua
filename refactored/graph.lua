@@ -1,8 +1,25 @@
 --[[
 graph.lua
 
-负责维护响应式图的底层连接结构。这里不关心 signal/computed/effect 的业务语义，
-只关心 Link 如何同时挂进两条双向链表，以及如何被安全移除。
+模块概述：
+依赖图维护模块。它实现响应式系统最底层的边管理逻辑，负责创建、复用、插入和解绑
+Link 节点，并维护 dependency 与 subscriber 两个方向上的双向链表结构。
+
+设计动机与职责：
+响应式传播既要能从依赖源快速找到所有订阅者，又要能从订阅者回溯并清理旧依赖；
+graph.lua 通过“一条边对应一个 Link，且同时挂在两条链上”的方式解决这个问题，
+从而支持 O(1) 连接/移除、按追踪版本复用旧 Link，以及 effect/computed 重跑后的
+陈旧依赖清理，而不把任何 signal、computed、effect 的业务语义混入图层实现。
+
+协作关系：
+它直接依赖 tracer 提供可选的结构化调试事件，并接收由 engine 注入的
+onDependencyBecameUnwatched 回调；engine 依赖它完成 trackRead、清理依赖和失活回收，
+primitives 也通过它建立父子 effect 或 scope 的连接关系。
+
+核心概念：
+本模块的关键数据结构是 Link 节点，以及 dep.subs / subsTail 与 sub.deps / depsTail
+两条正交的双向链表。除此之外，Link.version、反向解绑顺序和“当前追踪前缀”的判定
+也是支撑增量追踪与依赖复用的核心概念。
 ]]
 
 local graph = {}

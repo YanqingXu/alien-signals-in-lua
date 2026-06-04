@@ -1,8 +1,23 @@
 --[[
 constants.lua
 
-集中放置响应式系统的常量、类型标记和轻量工具函数。其它模块只依赖这里的
-“稳定事实”：节点有哪些类型、状态有哪些位标记、如何读写这些标记。
+模块概述：
+常量与轻量工具模块。它集中定义响应式系统中的稳定事实，包括节点类型标记、位标志、
+标志位操作函数，以及 callable 与节点之间的反向映射。
+
+设计动机与职责：
+响应式运行时中的 Marker、ReactiveFlags 和状态判定如果分散在 graph、engine、
+primitives 等模块中，会很快引入循环依赖和语义漂移。constants.lua 作为叶子模块，
+负责提供唯一权威定义，让其他模块都建立在同一套节点类型与状态机词汇之上。
+
+协作关系：
+它只依赖 bit 库，不依赖任何业务模块；graph、scheduler、engine、primitives、tracer
+以及 init 都从这里读取类型标记、位掩码和辅助判定，因此它是整套模块化分层的公共基座。
+
+核心概念：
+本模块处理的关键数据包括 SIGNAL_MARKER / COMPUTED_MARKER / EFFECT_MARKER /
+EFFECT_SCOPE_MARKER，ReactiveFlags 与 HAS_CHILD_EFFECT，弱键表 functionToNode，
+以及 addFlags、removeFlags、hasFlag 一类围绕位运算展开的状态工具。
 ]]
 
 local bit = require("bit")

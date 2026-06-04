@@ -1,8 +1,25 @@
 --[[
 primitives.lua
 
-实现用户侧 API：signal、computed、effect、effectScope 和 trigger。这个模块只负责
-创建具体节点与组织公开行为；依赖图、脏检查、调度等核心细节委托给其它模块。
+模块概述：
+用户侧响应式原语模块。它把底层算法与图结构包装成 signal、computed、effect、
+effectScope、trigger 等对外 API，并维持与单文件版本一致的公开调用方式。
+
+设计动机与职责：
+用户需要的是简单稳定的原语，而不是直接操作 Link、ReactiveFlags 或 trackingVersion。
+primitives.lua 的职责是创建对应节点、组织 getter/setter 或 stop callable 的外部行为，
+并把传播、脏值检查、调度与回收逻辑分别委托给 engine、graph 与 scheduler，使 API 层
+保持薄而清晰，同时承担 effect 父子关系、scope 生命周期与手动 trigger 这类组装职责。
+
+协作关系：
+它直接依赖 constants、graph、scheduler、engine 与 tracer，最终由 init.lua 聚合导出给用户。
+同时它会向 engine 注入 stop handler，让算法层在节点失去订阅者时能够回调到这里执行
+effect 和 scope 的实际停止与 cleanup 流程。
+
+核心概念：
+本模块围绕各类节点构造、callable 与 node 的绑定关系、signal 的读写闭包、computed 的
+懒读取、effect 的 cleanup、effectScope 的子树回收，以及 trigger 使用的临时 subscriber
+等概念展开；节点上附带的 customLabel 也在这一层被写入，供 tracing 和调试使用。
 ]]
 
 local bit = require("bit")

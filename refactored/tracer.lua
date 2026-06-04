@@ -1,8 +1,25 @@
 --[[
 tracer.lua
 
-默认关闭的运行时追踪器。核心模块只发出结构化事件；是否打印、如何展示，
-由外部注入 handler 决定。
+模块概述：
+结构化运行时追踪模块。它为响应式系统提供默认关闭的观测层，把 signal、graph、
+scheduler、engine 与 primitives 发出的事件整理为稳定的调试标签、flags 文本和日志行。
+
+设计动机与职责：
+教学和排障需要看到运行时链路，但核心算法不能直接耦合到 print 或特定展示格式。
+tracer.lua 通过 handler 注入把“事件采集”与“事件呈现”解耦，负责维护事件序号、缩进层级、
+节点与 Link 的稳定标识、格式化输出，以及 handler 抛错时的隔离与记录，从而让追踪能力
+既足够详细，又不会干扰正常运行路径。
+
+协作关系：
+它依赖 constants 提供节点类型与 flags 语义，并被 graph、scheduler、engine、primitives
+在关键路径中调用 emit/enter/leave 发出结构化事件；init.lua 再把 tracer 和 trace handler
+控制函数统一暴露给外部示例、调试脚本与测试使用。
+
+核心概念：
+本模块处理的关键概念包括 handler、sequence、depth、lastError，弱键表 nodeIds/linkIds，
+nodeLabel 与 linkLabel 的稳定命名，flagsText 的位标志可视化，以及包含 nodeType、
+nodeLabel、flagsText 和 data 的事件对象。
 ]]
 
 local bit = require("bit")

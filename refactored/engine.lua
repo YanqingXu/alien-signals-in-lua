@@ -1,8 +1,25 @@
 --[[
 engine.lua
 
-响应式系统的核心算法层。这里负责依赖追踪、失效传播和脏值检查，但不创建用户
-直接调用的 signal/computed/effect 函数；这些原语放在 primitives.lua。
+模块概述：
+响应式核心算法模块。它负责 active subscriber 管理、依赖追踪、失效传播、脏值检查、
+computed 重算、effect 重跑与无订阅节点的回收，是整套运行时的决策中心。
+
+设计动机与职责：
+图结构维护、调度、用户 API 与 tracing 都需要共享同一套“谁正在读、谁可能变脏、
+谁现在应该重算”的算法语义。engine.lua 把这些高频决策集中起来，通过 PUSH 阶段的
+传播标记和 PULL 阶段的脏值确认，将 signal 写入、computed 惰性求值和 effect 刷新
+统一到一套状态机中，同时避免 graph 与 scheduler 承担业务语义。
+
+协作关系：
+它直接依赖 constants、graph、scheduler 与 tracer，并向 graph 注入无人订阅时的回收回调，
+向 scheduler 注入 runEffectHandler。primitives 依赖它实现 signal/computed/effect 的核心行为，
+并通过 stop handler 反向补齐 effect/scope 的停止流程。
+
+核心概念：
+本模块处理的关键概念包括 activeSubscriber、runDepth、trackingVersion、Pending/Dirty/
+RecursedCheck/Recursed 等状态位，以及 beginTrack、trackRead、propagate、checkDeps、
+updateComputed、runQueuedEffect 这类围绕追踪版本与脏值状态机展开的核心算子。
 ]]
 
 local bit = require("bit")

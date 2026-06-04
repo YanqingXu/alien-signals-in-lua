@@ -1,8 +1,24 @@
 --[[
 scheduler.lua
 
-负责“什么时候运行 effect”。它只管理批量更新深度、effect 队列，以及错误时
-队列状态如何恢复；真正的 effect 执行由 engine 注入进来的 runEffectHandler 完成。
+模块概述：
+批量更新与 effect 调度模块。它负责维护 batch 深度、排队等待执行的 effect 队列，
+并在安全时机统一 flush 队列，而不是在每次写入时立即重跑副作用。
+
+设计动机与职责：
+响应式系统需要把“写入导致的失效传播”与“effect 真正执行”解耦，否则连续多次写入
+会造成重复运行与顺序混乱。scheduler.lua 的职责是把 effect 的执行延迟到批处理边界，
+维持嵌套 effect 的一致出队顺序，并在某个 effect 抛错时恢复剩余队列的 Watching 状态，
+避免调度器留下半失效的节点。
+
+协作关系：
+它依赖 constants 提供 Watching 等标志位语义，依赖 tracer 输出调度事件；实际如何
+重跑单个 effect 由 engine 通过 runEffectHandler 注入。上层的 primitives 与公开入口
+通过 startBatch、endBatch、getBatchDepth 暴露调度控制能力。
+
+核心概念：
+本模块围绕 queuedEffects、queuedEffectCount、queueReadIndex、batchDepth 等队列状态运转，
+并以 ReactiveFlags.Watching、Recursed 等标志作为入队去重和异常恢复的关键依据。
 ]]
 
 local bit = require("bit")
